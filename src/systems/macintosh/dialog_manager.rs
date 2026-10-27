@@ -8796,8 +8796,8 @@ mod tests {
         let button_rect = (50, 100, 70, 160);
         let (outer, oval) = default_button_outline_geometry(button_rect);
         assert_eq!(outer, (46, 96, 74, 164));
-        // height = 74 - 46 = 28; oval = max(4, 28/2 - 4) = 10
-        assert_eq!(oval, 10);
+        // Startside's patch: 16 x 16 corners, as IM I-407 (was max(4, height / 2 - 4) = 10).
+        assert_eq!(oval, 16);
 
         // Cancel button title predicates
         assert!(is_dialog_cancel_button_title(b"Cancel"));

@@ -9482,10 +9482,22 @@
         let (mut disp, _cpu, mut bus) = setup();
         disp.set_screen_mode_for_test(screen_base, row_bytes, 512, 342, 1);
 
+        // Startside's patch: in a dialog the application draws the ring (IM I-401), so none here.
+        disp.draw_dialog(&mut bus, bounds, 1, "", &items, 1, "", 0, false, dialog_ptr);
+        assert!(
+            !screen_pixel_is_set(&bus, screen_base, row_bytes, 56, 70),
+            "a dialog's default button gets no ring from the Dialog Manager"
+        );
+        for offset in 0..row_bytes * 342 {
+            bus.write_byte(screen_base + offset, 0);
+        }
+
+        // An alert's does (IM I-418).
+        disp.alert_dialog_ptrs.insert(dialog_ptr);
         disp.draw_dialog(&mut bus, bounds, 1, "", &items, 1, "", 0, false, dialog_ptr);
         assert!(
             screen_pixel_is_set(&bus, screen_base, row_bytes, 56, 70),
-            "DrawDialog should outline the aDefItem button"
+            "DrawDialog should outline the aDefItem button of an alert"
         );
 
         for offset in 0..row_bytes * 342 {
