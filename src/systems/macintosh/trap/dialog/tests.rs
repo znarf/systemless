@@ -18176,6 +18176,36 @@
     }
 
     #[test]
+    fn teactivate_erases_only_the_lines_and_keeps_tenew_line_height() {
+        // Startside's patch: a monostyled record keeps TENew's lineHeight when its font fields change and its text is
+        // recalculated, and TEActivate erases the rows its lines take, not the rest of a taller viewRect (SimCity's
+        // population field: a 3-pixel frame drawn over the viewRect's bottom rows).
+        let (mut disp, mut cpu, mut bus) = setup_with_port();
+        let te_handle = make_te_with_text(&mut disp, &mut bus, b"");
+        let te_ptr = bus.read_long(te_handle);
+        let line_height = bus.read_word(te_ptr + TrapDispatcher::TE_LINE_HEIGHT_OFFSET) as i16;
+        assert!(line_height > 0 && line_height < 40);
+        // The application enlarges the record's font by hand, then sets text: lineHeight stays.
+        bus.write_word(te_ptr + TrapDispatcher::TE_TX_SIZE_OFFSET, 24);
+        disp.te_set_text_contents(&mut bus, te_handle, b"12");
+        assert_eq!(bus.read_word(te_ptr + TrapDispatcher::TE_LINE_HEIGHT_OFFSET) as i16, line_height);
+
+        let (screen_base, row_bytes, _screen_w, _screen_h, _pixel_size) = disp.screen_mode;
+        for i in 0..(row_bytes * 80) {
+            bus.write_byte(screen_base + i, 0xFF);
+        }
+        cpu.write_reg(Register::A7, TEST_SP);
+        bus.write_long(TEST_SP, te_handle);
+        assert!(disp.dispatch_dialog(true, 0x1D8, &mut cpu, &mut bus).unwrap().is_ok());
+        let below = (line_height + 2)..58i16;
+        assert!(
+            below.clone().all(|y| screen_pixel_is_set(&bus, screen_base, row_bytes, 150, y)),
+            "rows of the viewRect below the line must be left alone"
+        );
+        assert!(!screen_pixel_is_set(&bus, screen_base, row_bytes, 150, 1), "the line itself is erased");
+    }
+
+    #[test]
     fn teupdate_classic_active_selection_inverts_selected_text_range() {
         fn render_classic_selection(selected: bool) -> u64 {
             let (mut disp, mut cpu, mut bus) = setup_with_port();

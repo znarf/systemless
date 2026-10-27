@@ -1486,6 +1486,9 @@ pub struct TrapDispatcher {
     pub(crate) find_window_hit_stub: u32,
     /// Startside's patch: application-WDEF windows whose highlight changed, to redraw with wDraw at the trap's end.
     pub(crate) pending_wdef_redraws: Vec<u32>,
+    /// Startside's patch: the next TextEdit redraw erases only the rows its lines take, not the whole viewRect
+    /// (caret blinks and activation, which on a Macintosh only invert the caret or the selection).
+    pub(crate) te_erase_text_rows_only: bool,
     /// Address of the lazily-allocated trampoline template used by the
     /// Control Manager to call a guest CDEF procedure.
     pub(crate) control_def_trampoline: u32,
@@ -3897,6 +3900,7 @@ impl TrapDispatcher {
             vfs_write_generation: 0,
             find_window_hit_stub: 0,
             pending_wdef_redraws: Vec::new(),
+            te_erase_text_rows_only: false,
             control_def_trampoline: 0,
             control_def_trampoline_chain: Vec::new(),
             control_callback_stack: Vec::new(),
