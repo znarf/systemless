@@ -534,12 +534,28 @@ pub(crate) fn render_scrollbar_bitmap(
     max: i16,
     hilite: u8,
 ) -> ThemeBitmap {
+    render_scrollbar_bitmap_at(theme_id, 0, 0, width, height, value, min, max, hilite)
+}
+
+/// `render_scrollbar_bitmap` for a scroll bar whose top-left corner is at (top, left) on the screen: its gray
+/// pattern lines up with the screen's (Startside's patch).
+pub(crate) fn render_scrollbar_bitmap_at(
+    theme_id: UiThemeId,
+    top: i16,
+    left: i16,
+    width: i16,
+    height: i16,
+    value: i16,
+    min: i16,
+    max: i16,
+    hilite: u8,
+) -> ThemeBitmap {
     let width = width.max(0);
     let height = height.max(0);
     let theme = theme_id.provider();
     let palette = theme.palette();
     let mut bitmap = ThemeBitmap::new(width as u32, height as u32, palette.window_background);
-    let mut ctx = ThemeDrawCtx::new(&mut bitmap);
+    let mut ctx = ThemeDrawCtx::with_pattern_origin(&mut bitmap, top, left);
     // The classic List Manager uses reserved CDEF state 254 for a blank
     // inactive track (Mac OS 8.1, both CPU slices). It differs from 255,
     // which draws the disabled arrows of an ordinary scroll control.
@@ -581,11 +597,19 @@ pub(crate) fn render_scrollbar_bitmap(
 
 pub struct ThemeDrawCtx<'a> {
     bitmap: &'a mut ThemeBitmap,
+    /// Startside's patch: where the bitmap's (0, 0) lands on the screen, so a pattern (the scroll bar's gray) lines up
+    /// with the screen's coordinates as QuickDraw's patterns do, whatever the control's position.
+    pattern_origin: (i16, i16),
 }
 
 impl<'a> ThemeDrawCtx<'a> {
     pub fn new(bitmap: &'a mut ThemeBitmap) -> Self {
-        Self { bitmap }
+        Self { bitmap, pattern_origin: (0, 0) }
+    }
+
+    /// A context whose patterns are aligned as if the bitmap were drawn at (top, left) on the screen.
+    pub fn with_pattern_origin(bitmap: &'a mut ThemeBitmap, top: i16, left: i16) -> Self {
+        Self { bitmap, pattern_origin: (top, left) }
     }
 
     pub fn fill_rect(&mut self, rect: ThemeRect, color: Rgb8) {
@@ -2297,54 +2321,133 @@ fn draw_scrollbar_chrome(
     palette: UiThemePalette,
     state: ScrollbarState,
 ) {
+    // Startside's patch: the black-and-white scroll bar of System 6 and 7 (the standard CDEF), after screenshots of
+    // SimCity on a real System 7: outline arrows (solid while pressed), a light gray track (QuickDraw's ltGray,
+    // aligned with the screen), and a plain white scroll box inset one pixel from the bar's sides. Inactive (hilite
+    // 255) or with nothing to scroll, the arrows stay and the track is white with no scroll box. It drew a shaded
+    // System 7.5 look before: solid arrows, a diagonal track and a box with grip lines.
     if state.rect.top >= state.rect.bottom || state.rect.left >= state.rect.right {
         return;
     }
 
-    ctx.fill_rect(state.rect, palette.frame_light);
+    ctx.fill_rect(state.rect, palette.window_background);
     ctx.frame_rect(state.rect, palette.frame_dark);
 
     let (decrement, increment) = scrollbar_arrow_rects(state);
     let track = scrollbar_track_rect(state);
-    ctx.fill_rect(track, palette.window_background);
     if state.enabled && state.min < state.max {
-        draw_scrollbar_pattern(ctx, track, palette.selection);
+        draw_classic_scrollbar_track(ctx, track, palette.frame_dark);
     }
 
     if let Some(thumb) = scrollbar_thumb_rect(state) {
-        let (page_before, page_after) = scrollbar_page_rects(state, thumb);
-        if state.highlighted_part == ScrollbarPart::PageBefore {
-            ctx.fill_rect(page_before, palette.selection);
-        }
-        if state.highlighted_part == ScrollbarPart::PageAfter {
-            ctx.fill_rect(page_after, palette.selection);
-        }
-        let thumb_fill = if state.highlighted_part == ScrollbarPart::Thumb {
-            palette.selection
-        } else {
-            palette.frame_light
+        let thumb = match state.orientation {
+            ScrollbarOrientation::Vertical => ThemeRect {
+                left: thumb.left + 1,
+                right: thumb.right - 1,
+                ..thumb
+            },
+            ScrollbarOrientation::Horizontal => ThemeRect {
+                top: thumb.top + 1,
+                bottom: thumb.bottom - 1,
+                ..thumb
+            },
         };
-        ctx.fill_rect(thumb, thumb_fill);
+        ctx.fill_rect(thumb, palette.window_background);
         ctx.frame_rect(thumb, palette.frame_dark);
-        draw_scrollbar_grip(ctx, palette, state.orientation, thumb);
     }
 
-    draw_scrollbar_button(
-        ctx,
-        palette,
-        state.orientation,
-        decrement,
-        true,
-        state.highlighted_part == ScrollbarPart::DecrementArrow,
-    );
-    draw_scrollbar_button(
-        ctx,
-        palette,
-        state.orientation,
-        increment,
-        false,
-        state.highlighted_part == ScrollbarPart::IncrementArrow,
-    );
+    for (rect, decrement_arrow, part) in [
+        (decrement, true, ScrollbarPart::DecrementArrow),
+        (increment, false, ScrollbarPart::IncrementArrow),
+    ] {
+        ctx.frame_rect(rect, palette.frame_dark);
+        draw_classic_scrollbar_arrow(
+            ctx,
+            palette.frame_dark,
+            state.orientation,
+            rect,
+            decrement_arrow,
+            state.highlighted_part == part,
+        );
+    }
+}
+
+/// The up arrow of the standard scroll bar, row by row in its 16 x 16 box (borders on rows and columns 0 and 15):
+/// the columns drawn black. Read off a System 7 screenshot (SimCity's edit window).
+const CLASSIC_UP_ARROW: [(i16, &[i16]); 10] = [
+    (3, &[7, 8]),
+    (4, &[6, 9]),
+    (5, &[5, 10]),
+    (6, &[4, 11]),
+    (7, &[3, 12]),
+    (8, &[2, 3, 4, 5, 10, 11, 12, 13]),
+    (9, &[5, 10]),
+    (10, &[5, 10]),
+    (11, &[5, 10]),
+    (12, &[5, 6, 7, 8, 9, 10]),
+];
+
+fn draw_classic_scrollbar_arrow(
+    ctx: &mut ThemeDrawCtx<'_>,
+    color: Rgb8,
+    orientation: ScrollbarOrientation,
+    rect: ThemeRect,
+    decrement: bool,
+    pressed: bool,
+) {
+    // Each up-arrow cell (row, column) and, pressed, the cells between a row's first and last: the arrow filled.
+    for &(row, cols) in CLASSIC_UP_ARROW.iter() {
+        let span: Vec<i16> = if pressed {
+            (cols[0]..=cols[cols.len() - 1]).collect()
+        } else {
+            cols.to_vec()
+        };
+        for col in span {
+            // Down mirrors the rows; left is the up arrow turned on its side, one pixel nearer its tip (as the
+            // screenshot shows), and right mirrors left.
+            let (y, x) = match (orientation, decrement) {
+                (ScrollbarOrientation::Vertical, true) => (row, col),
+                (ScrollbarOrientation::Vertical, false) => (15 - row, col),
+                (ScrollbarOrientation::Horizontal, true) => (col, row - 1),
+                (ScrollbarOrientation::Horizontal, false) => (col, 16 - row),
+            };
+            if rect.top + y >= rect.bottom || rect.left + x >= rect.right {
+                continue;
+            }
+            ctx.fill_rect(
+                ThemeRect {
+                    top: rect.top + y,
+                    left: rect.left + x,
+                    bottom: rect.top + y + 1,
+                    right: rect.left + x + 1,
+                },
+                color,
+            );
+        }
+    }
+}
+
+/// QuickDraw's ltGray ($88 $22 ...), in screen coordinates.
+fn draw_classic_scrollbar_track(ctx: &mut ThemeDrawCtx<'_>, rect: ThemeRect, color: Rgb8) {
+    let (origin_top, origin_left) = ctx.pattern_origin;
+    for y in rect.top..rect.bottom {
+        let screen_y = i32::from(origin_top) + i32::from(y);
+        let phase = if screen_y.rem_euclid(2) == 0 { 0 } else { 2 };
+        for x in rect.left..rect.right {
+            let screen_x = i32::from(origin_left) + i32::from(x);
+            if screen_x.rem_euclid(4) == phase {
+                ctx.fill_rect(
+                    ThemeRect {
+                        top: y,
+                        left: x,
+                        bottom: y + 1,
+                        right: x + 1,
+                    },
+                    color,
+                );
+            }
+        }
+    }
 }
 
 fn draw_systemless_scrollbar_chrome(
@@ -2538,44 +2641,6 @@ fn scrollbar_page_rects(state: ScrollbarState, thumb: ThemeRect) -> (ThemeRect, 
     }
 }
 
-fn draw_scrollbar_pattern(ctx: &mut ThemeDrawCtx<'_>, rect: ThemeRect, color: Rgb8) {
-    for y in rect.top..rect.bottom {
-        for x in rect.left..rect.right {
-            if (x + y) & 3 == 0 {
-                ctx.fill_rect(
-                    ThemeRect {
-                        top: y,
-                        left: x,
-                        bottom: y + 1,
-                        right: x + 1,
-                    },
-                    color,
-                );
-            }
-        }
-    }
-}
-
-fn draw_scrollbar_button(
-    ctx: &mut ThemeDrawCtx<'_>,
-    palette: UiThemePalette,
-    orientation: ScrollbarOrientation,
-    rect: ThemeRect,
-    decrement: bool,
-    highlighted: bool,
-) {
-    ctx.fill_rect(
-        inset_rect(rect, 1),
-        if highlighted {
-            palette.selection
-        } else {
-            palette.frame_light
-        },
-    );
-    ctx.frame_rect(rect, palette.frame_dark);
-    draw_scrollbar_arrow(ctx, palette, orientation, rect, decrement);
-}
-
 fn draw_systemless_scrollbar_button(
     ctx: &mut ThemeDrawCtx<'_>,
     palette: UiThemePalette,
@@ -2671,44 +2736,6 @@ fn draw_scrollbar_arrow(
         },
     };
     ctx.fill_rect(shaft, palette.frame_dark);
-}
-
-fn draw_scrollbar_grip(
-    ctx: &mut ThemeDrawCtx<'_>,
-    palette: UiThemePalette,
-    orientation: ScrollbarOrientation,
-    rect: ThemeRect,
-) {
-    match orientation {
-        ScrollbarOrientation::Vertical => {
-            let left = (rect.left + rect.right) / 2 - 3;
-            for y in [rect.top + 5, rect.top + 7, rect.top + 9, rect.top + 11] {
-                ctx.fill_rect(
-                    ThemeRect {
-                        top: y,
-                        left,
-                        bottom: y + 1,
-                        right: left + 6,
-                    },
-                    palette.frame_dark,
-                );
-            }
-        }
-        ScrollbarOrientation::Horizontal => {
-            let top = (rect.top + rect.bottom) / 2 - 3;
-            for x in [rect.left + 5, rect.left + 7, rect.left + 9, rect.left + 11] {
-                ctx.fill_rect(
-                    ThemeRect {
-                        top,
-                        left: x,
-                        bottom: top + 6,
-                        right: x + 1,
-                    },
-                    palette.frame_dark,
-                );
-            }
-        }
-    }
 }
 
 fn popup_indicator_rect(rect: ThemeRect) -> ThemeRect {
@@ -2939,6 +2966,35 @@ mod tests {
                 render_scrollbar_bitmap(theme, 16, 114, 4, 0, 6, 255).rgba()
             );
         }
+    }
+
+    #[test]
+    fn classic_scrollbar_is_the_system_6_and_7_black_and_white_one() {
+        // Startside's patch: outline arrows, ltGray track aligned with the screen, a plain scroll box inset one pixel
+        // (SimCity's edit window on a real System 7). A 16 x 100 vertical bar at (63, 480), value at its minimum.
+        let black = [0u8, 0, 0];
+        let palette = UiThemeId::ClassicSystem7.provider().palette();
+        let white = [palette.window_background.r, palette.window_background.g, palette.window_background.b];
+        let bitmap = render_scrollbar_bitmap_at(UiThemeId::ClassicSystem7, 63, 480, 16, 100, 0, 0, 10, 0);
+        // The up arrow's tip and its hollow inside.
+        assert_eq!(rgb_at(&bitmap, 7, 3), black);
+        assert_eq!(rgb_at(&bitmap, 8, 3), black);
+        assert_eq!(rgb_at(&bitmap, 7, 5), white, "the arrow is an outline");
+        assert_eq!(rgb_at(&bitmap, 2, 8), black, "the arrow's shoulders");
+        // The scroll box right under the arrow's box: its sides one pixel in, white inside, no grip lines.
+        assert_eq!(rgb_at(&bitmap, 1, 18), black);
+        assert_eq!(rgb_at(&bitmap, 14, 18), black);
+        assert!((2..14).all(|x| (17..30).all(|y| rgb_at(&bitmap, x, y) == white)));
+        // The track: ltGray in screen coordinates (row 63 + 40 = 103, odd: columns 2 mod 4).
+        for x in 1..15u32 {
+            let screen_x = 480 + x;
+            assert_eq!(rgb_at(&bitmap, x, 40) == black, screen_x % 4 == 2, "track at column {x}");
+            assert_eq!(rgb_at(&bitmap, x, 41) == black, screen_x % 4 == 0, "track at column {x}");
+        }
+        // Inactive: arrows, a white track, no scroll box.
+        let inactive = render_scrollbar_bitmap_at(UiThemeId::ClassicSystem7, 63, 480, 16, 100, 0, 0, 10, 255);
+        assert_eq!(rgb_at(&inactive, 7, 3), black);
+        assert!((1..15).all(|x| (16..84).all(|y| rgb_at(&inactive, x, y) == white)));
     }
 
     #[test]
