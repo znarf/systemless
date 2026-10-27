@@ -4039,6 +4039,7 @@ impl super::TrapDispatcher {
             Self::duplicate_handle_data(bus, handle)
         };
         let bounds = self.positioned_window_bounds(bus, bounds, position, 1);
+        self.drawing_alert.set(true); // Startside's patch: its default button outlined (IM I-401)
         let dialog_ptr = self.finish_dialog_creation(
             bus,
             cpu,
@@ -4055,9 +4056,11 @@ impl super::TrapDispatcher {
             None,
             false,
         );
+        self.drawing_alert.set(false);
         if dialog_ptr == 0 {
             return false;
         }
+        self.alert_dialog_ptrs.insert(dialog_ptr);
         let cancel_item = crate::dialog_manager::evaluate_dialog_cancel_item(
             None,
             items.iter().map(|item| (item.item_type, &item.text)),
@@ -6547,7 +6550,10 @@ impl super::TrapDispatcher {
         // aDefItem is authoritative for both Return/Enter semantics and the
         // standard button's default chrome. Drawing that chrome here keeps
         // the initial dialog shell coherent before application userItems run.
-        let auto_default_outline = true;
+        // Startside's patch: only an alert's default button gets the bold ring from the Dialog Manager (IM I-401,
+        // I-418); in a dialog the application draws it (PenSize(3,3), FrameRoundRect): MacPaint's About box had a
+        // ring the real one hasn't (the user: "button in dialogs are painted wrong").
+        let auto_default_outline = self.drawing_alert.get() || self.alert_dialog_ptrs.contains(&dialog_ptr);
 
         // Draw each item
         for (i, item) in items.iter().enumerate() {
@@ -6959,7 +6965,10 @@ impl super::TrapDispatcher {
         // Apply default chrome after restoring guest-owned pixels and
         // redrawing live standard controls so retained composition cannot
         // drop the aDefItem outline.
-        let auto_default_outline = true;
+        // Startside's patch: only an alert's default button gets the bold ring from the Dialog Manager (IM I-401,
+        // I-418); in a dialog the application draws it (PenSize(3,3), FrameRoundRect): MacPaint's About box had a
+        // ring the real one hasn't (the user: "button in dialogs are painted wrong").
+        let auto_default_outline = self.drawing_alert.get() || self.alert_dialog_ptrs.contains(&dialog_ptr);
         // Startside's patch: text items (whose redraw erases their rect) first, controls last, as DrawDialog
         // draws a dialog (controls after the other items); icons redrawn with the texts. MacPaint's About box has
         // statText rects running under its icon and OK button: redrawn in item order, they erased the button's left
@@ -9773,6 +9782,7 @@ impl super::TrapDispatcher {
         if dialog_ptr == 0 {
             return;
         }
+        self.alert_dialog_ptrs.remove(&dialog_ptr); // Startside's patch
         let retained_modal_is_logical_front = self.dialog_modal_entered.contains(&dialog_ptr)
             && self
                 .window_stack

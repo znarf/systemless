@@ -5461,7 +5461,7 @@ pub const fn evaluate_update_dialog_parameters(
 /// default button ring around a push button rectangle.
 ///
 /// Macintosh Toolbox Essentials (1992), Listing 6-17:
-/// Outer rect is outset by 4 pixels in all dimensions; corner oval diameter is `max(4, height / 2 - 4)`.
+/// Outer rect is outset by 4 pixels in all dimensions; corner oval diameter 16 (Startside's patch; was `max(4, height / 2 - 4)`).
 pub fn default_button_outline_geometry(
     button_rect: (i16, i16, i16, i16),
 ) -> ((i16, i16, i16, i16), i16) {
@@ -5471,8 +5471,9 @@ pub fn default_button_outline_geometry(
         button_rect.2.saturating_add(DEFAULT_BUTTON_OUTLINE_INSET),
         button_rect.3.saturating_add(DEFAULT_BUTTON_OUTLINE_INSET),
     );
-    let height = outer.2.saturating_sub(outer.0);
-    let oval = (height / 2 - 4).max(4);
+    // Startside's patch: the ring Inside Macintosh draws, PenSize(3,3) and FrameRoundRect(r, 16, 16) (IM I-407,
+    // Toolbox Essentials Listing 6-17): with (height / 2 - 4) the corners came out ragged (the user's screenshot).
+    let oval = 16;
     (outer, oval)
 }
 
@@ -5480,7 +5481,7 @@ pub fn default_button_outline_geometry(
 ///
 /// Macintosh Toolbox Essentials (1992), Listing 6-17, pp. 6-50--6-51:
 /// The standard default button ring is outset by 4 pixels around the button rectangle,
-/// has a corner diameter of `(height / 2 - 4).max(4)`, and a pen thickness of 3 pixels.
+/// has a corner diameter of 16 (Startside's patch), and a pen thickness of 3 pixels.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DialogDefaultButtonOutline {
     outer_rect: (i16, i16, i16, i16),
@@ -12068,9 +12069,10 @@ mod tests {
         // evaluate_dialog_default_button_outline
         let outline = evaluate_dialog_default_button_outline((10, 20, 30, 40));
         assert_eq!(outline.outer_rect(), (6, 16, 34, 44));
-        assert_eq!(outline.oval_width(), 10);
-        assert_eq!(outline.oval_height(), 10);
-        assert_eq!(outline.oval(), 10);
+        // Startside's patch: 16 x 16, as IM I-407.
+        assert_eq!(outline.oval_width(), 16);
+        assert_eq!(outline.oval_height(), 16);
+        assert_eq!(outline.oval(), 16);
         assert_eq!(outline.thickness(), DEFAULT_BUTTON_OUTLINE_THICKNESS);
 
         // evaluate_dialog_item_default_button_outline

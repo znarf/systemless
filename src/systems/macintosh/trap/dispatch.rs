@@ -1468,6 +1468,10 @@ pub struct TrapDispatcher {
     pub(crate) pending_wdef_redraws: Vec<u32>,
     /// Startside's patch: the text state (font, face, size) of the dialog being drawn, over the current port's.
     pub(crate) dialog_text_state: std::cell::Cell<Option<(i16, u8, i16)>>,
+    /// Startside's patch: alert windows (the Dialog Manager outlines an alert's default button, IM I-401; a dialog's
+    /// it never does: the application draws that ring itself), and an alert being created.
+    pub(crate) alert_dialog_ptrs: std::collections::HashSet<u32>,
+    pub(crate) drawing_alert: std::cell::Cell<bool>,
     /// Startside's patch: counts writes to the virtual disk (a file's data or resources, a file removed), so an
     /// embedder can look for changed files only when something was written.
     pub(crate) vfs_write_generation: u64,
@@ -3866,6 +3870,8 @@ impl TrapDispatcher {
             find_window_hit_stub: 0,
             pending_wdef_redraws: Vec::new(),
             dialog_text_state: std::cell::Cell::new(None),
+            alert_dialog_ptrs: std::collections::HashSet::new(),
+            drawing_alert: std::cell::Cell::new(false),
             vfs_write_generation: 0,
             control_def_trampoline: 0,
             control_def_trampoline_chain: Vec::new(),
