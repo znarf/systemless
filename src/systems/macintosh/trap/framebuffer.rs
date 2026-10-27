@@ -6100,6 +6100,12 @@ impl super::TrapDispatcher {
     /// so game drawing (explosions, etc.) can overwrite them. This method restores
     /// the chrome and should be called after each frame of emulation.
     pub fn redraw_chrome(&mut self, bus: &mut MacMemoryBus) {
+        // Startside's patch: not while Standard File's dialog is up. It is drawn on the screen without being a window
+        // on the window list, so each frame's pass painted the windows behind it over it: MacPaint's title bar and
+        // frame came through the Save dialog's top and sides. The dialog is modal; nothing behind it changes.
+        if self.standard_file_put_tracking.is_some() || self.standard_file_get_tracking.is_some() {
+            return;
+        }
         self.refresh_menu_bar_policy_from_guest(bus);
         // One colour-table read per chrome pass serves every colour lookup
         // in it; nothing in the pass writes the table.
@@ -8913,10 +8919,12 @@ mod redraw_chrome_tests {
             0x7E,
             "StandardPutFile overlay pixels outside WindowList must remain visible"
         );
-        assert_ne!(
+        // Startside's patch: no chrome pass at all while Standard File's dialog is up (it is modal, nothing behind
+        // it changes; the pass painted the windows behind over it), so the desktop is left as it is too.
+        assert_eq!(
             bus.read_byte(desktop_probe),
             0x7E,
-            "unowned desktop pixels must still be restored"
+            "no chrome pass while Standard File's dialog is up"
         );
     }
 
