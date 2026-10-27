@@ -158,7 +158,7 @@ pub fn get_glyph(font_id: i16, size: i16, ch: char) -> Option<(&'static Glyph, &
     // Mac Roman extended characters (0x80-0xFF). The raw byte was cast
     // to char so char code == Mac Roman code for this range.
     let mac_code = ch as u32;
-    // 0x7F too: a FONT may draw it (MacPaint 1.0's brush shape is its icon
+    // 0x7F too: a FONT may draw it (MacPaint 1.5's brush shape is its icon
     // font's 0x7F); fonts without it fall back as before (Startside's patch).
     if (0x7F..=0xFF).contains(&mac_code) {
         return macroman_or_ascii_fallback(font_id, size, mac_code as u8);

@@ -439,7 +439,7 @@ fn normalize_boolean_transfer_mode(mode: i16) -> i16 {
         0..=3 => mode,
         8..=11 => mode - 8,
         // Startside's patch: notPatCopy..notPatBic are patCopy..patBic with
-        // the pattern inverted (`pattern_inverted`), not patCopy. MacPaint 1's
+        // the pattern inverted (`pattern_inverted`), not patCopy. MacPaint 1.5's
         // paint bucket masks its fill with PenMode(notPatBic) + PaintRect, and
         // drawn as patCopy that flooded the whole window.
         // Inside Macintosh I, I-157 (pattern transfer modes).
@@ -2894,7 +2894,7 @@ mod tests {
     }
 
     // Startside's patch: notPatBic keeps only the pattern's black pixels
-    // (Inside Macintosh I, I-157), as MacPaint 1's paint bucket relies on.
+    // (Inside Macintosh I, I-157), as MacPaint 1.5's paint bucket relies on.
     #[test]
     fn not_pattern_modes_invert_the_pattern() {
         assert_eq!(normalize_boolean_transfer_mode(15), 3);

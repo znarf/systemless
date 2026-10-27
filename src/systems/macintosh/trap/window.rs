@@ -3153,7 +3153,7 @@ impl super::TrapDispatcher {
     ) {
         // Frontmost after insertion, not only when asked for in front: a window
         // created behind all others (NIL) while it's the only one is the front
-        // window, and was highlighted (MacPaint 1.0's document window, created
+        // window, and was highlighted (MacPaint 1.5's document window, created
         // before its desk window, behind NIL: drawn inactive, no stripes, no
         // close box). Startside's patch.
         let frontmost = bus.read_long(Self::LOWMEM_WINDOW_LIST) == window_ptr;
