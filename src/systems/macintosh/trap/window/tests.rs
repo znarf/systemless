@@ -1121,11 +1121,64 @@ fn getnewcwindow_visible_custom_wdef_arms_wnew_wcalcrgns_then_wdraw_trampoline()
         "final callback should restore chExtra and pnLocHFrac"
     );
     assert_eq!(bus.read_long(draw_tramp + 62), window_ptr + 12);
-    assert_eq!(bus.read_word(draw_tramp + 66), 0x4E75);
+    // Startside's patch: then the caller's port is given back (SetPort, SetGDevice) before the RTS.
+    assert_eq!(bus.read_word(draw_tramp + 66), 0x2F3C);
+    assert_eq!(bus.read_word(draw_tramp + 72), 0xA873);
+    assert_eq!(bus.read_word(draw_tramp + 74), 0x2F3C);
+    assert_eq!(bus.read_word(draw_tramp + 80), 0xAA31);
+    assert_eq!(bus.read_word(draw_tramp + 82), 0x4E75);
     assert_eq!(
         *disp.current_port, disp.window_manager_cport,
         "wDraw should run in the color Window Manager port"
     );
+}
+
+/// Startside's patch: a WDEF call gives the caller's port back once it returns. SimCity calls DrawGrowIcon on
+/// its edit window (an application WDEF, wDrawGIcon) and reads its clicks in that port afterwards; left in the
+/// Window Manager port, half its tool palette and its scroll bars stopped answering.
+#[test]
+fn wdef_call_restores_the_callers_port_after_it_returns() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let proc_id = (200i16 << 4) | 3;
+    install_wind_resource(&mut disp, &mut bus, 600, (34, 2, 114, 473), proc_id, true, false, 0, b"");
+    install_wdef_resource(&mut disp, &mut bus, 200);
+    let sp = TEST_SP - 10;
+    cpu.write_reg(Register::A7, sp);
+    cpu.write_reg(Register::PC, 0x1234_5678);
+    bus.write_long(sp, 0);
+    bus.write_long(sp + 4, 0);
+    bus.write_word(sp + 8, 600);
+    bus.write_long(sp + 10, 0);
+    dispatch(&mut disp, 0x246, &mut cpu, &mut bus).unwrap().unwrap();
+    let window_ptr = bus.read_long(sp + 10);
+
+    // The application draws in its window, then calls DrawGrowIcon on it.
+    let gdevice = *disp.current_gdevice;
+    disp.set_current_port_state(&mut bus, &mut cpu, window_ptr, Some(gdevice));
+    cpu.write_reg(Register::A7, sp);
+    cpu.write_reg(Register::PC, 0x2000_0000);
+    assert!(disp.arm_window_def_grow_icon(&mut cpu, &mut bus, window_ptr));
+
+    let tramp = disp.window_def_trampoline;
+    assert_eq!(cpu.read_reg(Register::PC), tramp);
+    assert_eq!(*disp.current_port, disp.window_manager_cport, "the WDEF runs in the Window Manager port");
+    assert_eq!(bus.read_word(tramp + 22), super::super::TrapDispatcher::WDEF_WDRAW_GICON_MSG as u16);
+    // After the WDEF and the registers: grafVars put back (a color window), then SetPort(window), SetGDevice, RTS.
+    let mut at = tramp + 46;
+    if bus.read_word(at) == 0x23FC {
+        at += 20;
+    }
+    assert_eq!(bus.read_word(at), 0x2F3C, "MOVE.L #port,-(SP)");
+    assert_eq!(bus.read_long(at + 2), window_ptr, "the caller's port");
+    assert_eq!(bus.read_word(at + 6), 0xA873, "_SetPort");
+    if gdevice != 0 {
+        assert_eq!(bus.read_word(at + 8), 0x2F3C);
+        assert_eq!(bus.read_long(at + 10), gdevice);
+        assert_eq!(bus.read_word(at + 14), 0xAA31, "_SetGDevice");
+        at += 8;
+    }
+    assert_eq!(bus.read_word(at + 8), 0x4E75, "RTS to the trap's caller");
+    assert!(at + 10 <= tramp + super::super::TrapDispatcher::WDEF_TRAMPOLINE_SIZE);
 }
 
 // ---------------------------------------------------------------
