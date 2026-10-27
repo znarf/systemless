@@ -3282,3 +3282,55 @@ fn callback_commands_validate_v2_comment_padding_and_following_shapes() {
     assert_eq!(commands[2].opcode, 0x31);
     assert_eq!(commands[2].data, [0, 1, 0, 2, 0, 6, 0, 7]);
 }
+
+#[test]
+fn pict_v1_bitsrect_enlarged_covers_each_source_pixel() {
+    // Startside's patch: SimCity's code-screen mark (PICT 1400, a 10 x 10 BitsRect, a box whose top-right quadrant
+    // is black) drawn three times larger. Each source pixel fills its 3 x 3 area; only every third pixel was drawn.
+    let mut bus = MacMemoryBus::new(2 * 1024 * 1024);
+    let screen_base = 0x08_0000u32;
+    let pic = 0x10_0000u32;
+    let mark: [u8; 85] = [
+        0x00, 0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x0a, 0x11, 0x01, 0xa0, 0x00, 0x82,
+        0xa0, 0x00, 0x8e, 0x01, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x0a, 0x90,
+        0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x0a, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x0a, 0x00, 0x01, 0xff, 0xc0,
+        0x87, 0xc0, 0x87, 0xc0, 0x87, 0xc0, 0x87, 0xc0, 0x80, 0x40, 0x80, 0x40, 0x80, 0x40, 0x80,
+        0x40, 0xff, 0xc0, 0xa0, 0x00, 0x8f, 0xa0, 0x00, 0x83, 0xff,
+    ];
+    bus.write_bytes(pic, &mark);
+    let clut = [[0u16; 3]; 256];
+    let (ok, _) = draw_picture(
+        &mut bus,
+        pic,
+        0,
+        0,
+        30,
+        30,
+        (screen_base, 4, 32, 32, 1),
+        &clut,
+        0,
+        None,
+    );
+    assert!(ok);
+    let black = |bus: &MacMemoryBus, x: u32, y: u32| {
+        bus.read_byte(screen_base + y * 4 + x / 8) & (0x80 >> (x % 8)) != 0
+    };
+    // The top edge: three rows, every pixel across.
+    for y in 0..3 {
+        assert!(
+            (0..30).all(|x| black(&bus, x, y)),
+            "row {y} of the top edge has holes"
+        );
+    }
+    // A row of the top half: the left edge (3 wide), white, then the black quadrant up to the right edge.
+    for y in 3..15 {
+        for x in 0..30 {
+            assert_eq!(black(&bus, x, y), !(3..15).contains(&x), "pixel ({x},{y})");
+        }
+    }
+    assert!(
+        !black(&bus, 30, 5),
+        "nothing past the destination rectangle"
+    );
+}

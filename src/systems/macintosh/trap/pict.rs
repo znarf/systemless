@@ -5323,7 +5323,19 @@ fn parse_bits_rect(
     // Read unpacked bitmap data (row_bytes * height bytes)
     for row in 0..height {
         let src_y = i32::from(bounds_top) + row as i32;
-        let mapped_pic_y = map_src_coord(src_y, src_top, src_bottom, pic_dst_top, pic_dst_bottom);
+        // Startside's patch: each source pixel covers its whole area of an enlarged destination, as in the indexed
+        // forms (map_src_pixel_span); only its origin was drawn: SimCity's code-screen marks (10 x 10 PICTs drawn
+        // three times larger) came out as a dotted gray, every third pixel.
+        let mapped_pic_y = map_src_pixel_span(
+            src_y,
+            src_top,
+            src_bottom,
+            pic_dst_top,
+            pic_dst_bottom,
+            frame_top,
+            dst_top,
+            scale_y,
+        );
         for col_byte in 0..row_bytes as u32 {
             let byte = bus.read_byte(pos);
             pos += 1;
@@ -5340,32 +5352,41 @@ fn parse_bits_rect(
                 } else {
                     continue;
                 };
-                let Some(pic_y) = mapped_pic_y else {
+                let Some((pic_y, y_start, y_end)) = mapped_pic_y else {
                     continue;
                 };
                 let src_x = i32::from(bounds_left) + px as i32;
-                let Some(pic_x) =
-                    map_src_coord(src_x, src_left, src_right, pic_dst_left, pic_dst_right)
-                else {
+                let Some((pic_x, x_start, x_end)) = map_src_pixel_span(
+                    src_x,
+                    src_left,
+                    src_right,
+                    pic_dst_left,
+                    pic_dst_right,
+                    frame_left,
+                    dst_left,
+                    scale_x,
+                ) else {
                     continue;
                 };
                 if clip_region.is_some_and(|clip| !clip.contains(pic_y, pic_x)) {
                     continue;
                 }
-                let x = ((pic_x - i32::from(frame_left)) as f64 * scale_x) as i32 + dst_left as i32;
-                let y = ((pic_y - i32::from(frame_top)) as f64 * scale_y) as i32 + dst_top as i32;
-                write_pixel_clipped(
-                    bus,
-                    screen_base,
-                    screen_rb,
-                    x,
-                    y,
-                    color_idx,
-                    screen_w,
-                    screen_h,
-                    scrn_ps,
-                    dst_clip,
-                );
+                for y in y_start..y_end {
+                    for x in x_start..x_end {
+                        write_pixel_clipped(
+                            bus,
+                            screen_base,
+                            screen_rb,
+                            x,
+                            y,
+                            color_idx,
+                            screen_w,
+                            screen_h,
+                            scrn_ps,
+                            dst_clip,
+                        );
+                    }
+                }
             }
         }
     }
@@ -5990,26 +6011,52 @@ fn blit_row(
                     } else {
                         continue;
                     };
-                    let Some(pic_x) = map_x(px) else {
+                    // Startside's patch: an enlarged 1-bit PackBitsRect covers each source pixel's whole area
+                    // (map_src_pixel_span, as the 4- and 8-bit forms), not only its origin: it came out dotted.
+                    let Some((_, y_start, y_end)) = map_src_pixel_span(
+                        src_y,
+                        src_top,
+                        src_bottom,
+                        pic_dst_top,
+                        pic_dst_bottom,
+                        frame_top,
+                        dst_top,
+                        scale_y,
+                    ) else {
+                        continue;
+                    };
+                    let src_x = i32::from(pm.bounds_left) + px as i32;
+                    let Some((pic_x, x_start, x_end)) = map_src_pixel_span(
+                        src_x,
+                        src_left,
+                        src_right,
+                        pic_dst_left,
+                        pic_dst_right,
+                        frame_left,
+                        dst_left,
+                        scale_x,
+                    ) else {
                         continue;
                     };
                     if clip_region.is_some_and(|clip| !clip.contains(pic_y, pic_x)) {
                         continue;
                     }
-                    let x =
-                        ((pic_x - i32::from(frame_left)) as f64 * scale_x) as i32 + dst_left as i32;
-                    write_pixel_clipped(
-                        bus,
-                        screen_base,
-                        screen_rb,
-                        x,
-                        base_y,
-                        color_idx,
-                        screen_w,
-                        screen_h,
-                        scrn_ps,
-                        dst_clip,
-                    );
+                    for y in y_start..y_end {
+                        for x in x_start..x_end {
+                            write_pixel_clipped(
+                                bus,
+                                screen_base,
+                                screen_rb,
+                                x,
+                                y,
+                                color_idx,
+                                screen_w,
+                                screen_h,
+                                scrn_ps,
+                                dst_clip,
+                            );
+                        }
+                    }
                 }
             }
         }
