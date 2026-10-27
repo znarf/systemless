@@ -73,8 +73,9 @@ impl super::TrapDispatcher {
     const WDEF_WDRAW_MSG: i16 = 0;
     const WDEF_WCALC_RGNS_MSG: i16 = 2;
     const WDEF_WNEW_MSG: i16 = 3;
+    const WDEF_WDRAW_GICON_MSG: i16 = 6;
     const WDEF_FIRST_APPLICATION_RESOURCE_ID: i16 = 128;
-    const WDEF_TRAMPOLINE_SIZE: u32 = 68;
+    const WDEF_TRAMPOLINE_SIZE: u32 = 84;
     const AUX_WIN_NEXT_OFFSET: u32 = 0;
     const AUX_WIN_OWNER_OFFSET: u32 = 4;
     pub(crate) const AUX_WIN_CTABLE_OFFSET: u32 = 8;
@@ -906,6 +907,7 @@ impl super::TrapDispatcher {
         return_slot: u32,
         next_trampoline: Option<u32>,
         restore_cgraf_fields: Option<(u32, u32)>,
+        restore_port: Option<(u32, u32)>,
     ) {
         bus.write_word(tramp, 0x48E7);
         bus.write_word(tramp + 2, 0xF0F0);
@@ -931,20 +933,35 @@ impl super::TrapDispatcher {
                 bus.write_long(tramp + 48, next);
             }
             None => {
+                let mut at = tramp + 46;
                 if let Some((graf_vars, color_fields)) = restore_cgraf_fields {
                     // MOVE.L #grafVars,window+8
-                    bus.write_word(tramp + 46, 0x23FC);
-                    bus.write_long(tramp + 48, graf_vars);
-                    bus.write_long(tramp + 52, window_ptr + 8);
+                    bus.write_word(at, 0x23FC);
+                    bus.write_long(at + 2, graf_vars);
+                    bus.write_long(at + 6, window_ptr + 8);
                     // MOVE.L #chExtra/pnLocHFrac,window+12
-                    bus.write_word(tramp + 56, 0x23FC);
-                    bus.write_long(tramp + 58, color_fields);
-                    bus.write_long(tramp + 62, window_ptr + 12);
-                    bus.write_word(tramp + 66, 0x4E75); // RTS
-                } else {
-                    bus.write_word(tramp + 46, 0x4E75); // RTS
-                    bus.write_long(tramp + 48, 0);
+                    bus.write_word(at + 10, 0x23FC);
+                    bus.write_long(at + 12, color_fields);
+                    bus.write_long(at + 16, window_ptr + 12);
+                    at += 20;
                 }
+                // Startside's patch: the Window Manager calls a WDEF in its own port and gives the caller's port
+                // and GDevice back after it (DrawGrowIcon, SelectWindow, NewWindow); the trap's caller expects
+                // D0-D2/A0-A1 changed anyway. Left in the Window Manager port after DrawGrowIcon, SimCity read its
+                // clicks in global coordinates: half its tool palette and its scroll bars stopped answering.
+                if let Some((port, gdevice)) = restore_port {
+                    bus.write_word(at, 0x2F3C); // MOVE.L #port,-(SP)
+                    bus.write_long(at + 2, port);
+                    bus.write_word(at + 6, 0xA873); // _SetPort
+                    at += 8;
+                    if gdevice != 0 {
+                        bus.write_word(at, 0x2F3C); // MOVE.L #gdh,-(SP)
+                        bus.write_long(at + 2, gdevice);
+                        bus.write_word(at + 6, 0xAA31); // _SetGDevice
+                        at += 8;
+                    }
+                }
+                bus.write_word(at, 0x4E75); // RTS
             }
         }
     }
@@ -974,6 +991,7 @@ impl super::TrapDispatcher {
         // low four bits of the window definition ID, and draw wDraw in the
         // Window Manager port. Macintosh Toolbox Essentials 1992, pp. 4-120
         // through 4-127; Inside Macintosh Volume I 1985, pp. I-282, I-304.
+        let restore_port = Some((*self.current_port, *self.current_gdevice)).filter(|&(port, _)| port != 0);
         let wmgr_port = self.ensure_color_window_manager_port(bus);
         self.set_current_port_state(bus, cpu, wmgr_port, None);
         self.clip_window_manager_port_above(bus, wmgr_port, window_ptr);
@@ -1019,10 +1037,10 @@ impl super::TrapDispatcher {
 
         for (idx, &(message, param)) in messages.iter().enumerate() {
             let next = trampolines.get(idx + 1).copied();
-            let final_restore = if next.is_none() {
-                restore_cgraf_fields
+            let (final_restore, final_port) = if next.is_none() {
+                (restore_cgraf_fields, restore_port)
             } else {
-                None
+                (None, None)
             };
             Self::write_window_def_trampoline(
                 bus,
@@ -1035,6 +1053,7 @@ impl super::TrapDispatcher {
                 return_slot,
                 next,
                 final_restore,
+                final_port,
             );
         }
 
@@ -1099,6 +1118,22 @@ impl super::TrapDispatcher {
             proc_id,
             &[(Self::WDEF_WCALC_RGNS_MSG, 0), (Self::WDEF_WDRAW_MSG, 0)],
         )
+    }
+
+    /// Startside's patch: DrawGrowIcon on a window with the application's own WDEF calls it with wDrawGIcon
+    /// (message 6, IM I-299 and I-304): SimCity's WDEF draws its edit window's size box and the line above its
+    /// horizontal scroll bar, which the standard size box drawn instead left out. False when it can't be called.
+    pub(crate) fn arm_window_def_grow_icon<C: CpuOps>(
+        &mut self,
+        cpu: &mut C,
+        bus: &mut MacMemoryBus,
+        window_ptr: u32,
+    ) -> bool {
+        if !self.window_uses_custom_def_proc(bus, window_ptr) || !self.window_visible(bus, window_ptr) {
+            return false;
+        }
+        let proc_id = self.window_proc_ids.get(&window_ptr).copied().unwrap_or(0);
+        self.arm_window_def_messages(cpu, bus, window_ptr, proc_id, &[(Self::WDEF_WDRAW_GICON_MSG, 0)])
     }
 
     fn desktop_gray_region_rect(&self, bus: &MacMemoryBus) -> (i16, i16, i16, i16) {
