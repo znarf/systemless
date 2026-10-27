@@ -43,7 +43,10 @@ pub(crate) fn app_heap_free_bytes(bus: &MacMemoryBus) -> u32 {
         && appl_limit != 0
         && appl_limit.saturating_add(EXPLICIT_PARTITION_HEADROOM) < mem_top;
 
-    if explicitly_partitioned {
+    // Startside's patch: no compatibility floor larger than the machine's memory (our SE/30 has 4 MB): MacPaint 1
+    // asks MaxMem, then NewHandle of that size for the picture it opens; told 24 MB, its NewHandle failed and it read
+    // the document through a NIL handle (into the ROM's address), so every reopened picture came up blank.
+    if explicitly_partitioned || (mem_top != 0 && mem_top <= APP_HEAP_COMPAT_FREE_FLOOR) {
         raw.min(APP_HEAP_COMPAT_FREE_CAP)
     } else {
         raw.clamp(APP_HEAP_COMPAT_FREE_FLOOR, APP_HEAP_COMPAT_FREE_CAP)
