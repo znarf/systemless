@@ -7051,7 +7051,13 @@ impl ProcessNativeMemoryManager {
         if handle == 0 {
             return;
         }
-        let ptr = bus.read_long(handle);
+        let mut ptr = bus.read_long(handle);
+        // Startside's patch: a master pointer may carry the block's flags in its high byte (24-bit Memory Manager,
+        // IM II-25): the block is at its low 24 bits. MacPaint 1.3 (built from its published source) locks its
+        // handles by setting bit 31 itself; its 1.4 MB file buffer was never freed, and the next Open found no room.
+        if ptr & 0xFF00_0000 != 0 && self.classic_allocator().allocation_size(ptr).is_none() {
+            ptr &= 0x00FF_FFFF;
+        }
         if dispose_data {
             self.classic_allocator().free(ptr);
         }
