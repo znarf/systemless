@@ -2136,11 +2136,13 @@ impl super::TrapDispatcher {
         let (requested_top, requested_left) =
             requested_origin.unwrap_or((centered_top, centered_left));
         let left = requested_left
-            .max(0)
-            .min((screen_width as i16 - STANDARD_FILE_GET_DIALOG_WIDTH).max(0));
+            .max(8)
+            .min((screen_width as i16 - STANDARD_FILE_GET_DIALOG_WIDTH - 8).max(0));
+        // Startside's patch: the double frame (8 pixels round the box) on screen too, below the menu bar: MacWrite's
+        // Open dialog ran off the screen's bottom.
         let top = requested_top
-            .max(0)
-            .min((screen_height as i16 - STANDARD_FILE_GET_DIALOG_HEIGHT).max(0));
+            .max(28)
+            .min((screen_height as i16 - STANDARD_FILE_GET_DIALOG_HEIGHT - 8).max(0));
         (
             top,
             left,
@@ -2215,10 +2217,12 @@ impl super::TrapDispatcher {
         tracking: &StandardFileGetTrackingState,
     ) {
         let items = Self::standard_file_get_dialog_items(tracking);
+        // Startside's patch: dBoxProc (1), the double-framed modal box System 6's Standard File is (it was the
+        // plain box, 2).
         self.draw_dialog(
             bus,
             tracking.bounds,
-            2,
+            1,
             "",
             &items,
             STANDARD_FILE_GET_OPEN_ITEM,
@@ -2779,10 +2783,12 @@ impl super::TrapDispatcher {
         let (_, _, location_label, writable) =
             self.standard_file_put_directory_location(tracking.current_dir_id);
         let items = Self::standard_file_put_dialog_items(tracking, &location_label, writable);
+        // Startside's patch: dBoxProc (1), the double-framed modal box System 6's Standard File is (it was the
+        // plain box, 2).
         self.draw_dialog(
             bus,
             tracking.bounds,
-            2,
+            1,
             "",
             &items,
             STANDARD_FILE_SAVE_ITEM,
