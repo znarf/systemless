@@ -22951,7 +22951,10 @@ impl super::TrapDispatcher {
     }
 
     fn quantize_region_edge(edge: f64) -> i16 {
-        Self::clamp_region_coord((edge - 0.5).ceil() as i32)
+        // Startside's patch: a crossing halfway between two pixels rounds up, as QuickDraw's region scan does (the edge
+        // stepped from its start plus half a pixel, then truncated); it rounded down, which moved every 45-degree edge one
+        // pixel left and gave SimCity's budget arrows (OpenRgn triangles) a one-pixel tip and three-pixel sides.
+        Self::clamp_region_coord((edge + 0.5).floor() as i32)
     }
 
     fn recorded_outline_rows(
