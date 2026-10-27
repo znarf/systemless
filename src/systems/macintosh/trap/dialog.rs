@@ -2852,6 +2852,7 @@ impl super::TrapDispatcher {
             if caret_state == 0 { 1 } else { 0 },
         );
         bus.write_long(te_ptr + Self::TE_CARET_TIME_OFFSET, self.current_tick());
+        self.te_erase_text_rows_only = true;
         self.draw_te_contents_region(cpu, bus, te_handle, true, TeRepaint::CaretLine);
     }
 
@@ -2957,7 +2958,13 @@ impl super::TrapDispatcher {
         if styled {
             bus.write_word(te_ptr + Self::TE_LINE_HEIGHT_OFFSET, 0xFFFF);
             bus.write_word(te_ptr + Self::TE_FONT_ASCENT_OFFSET, 0xFFFF);
-        } else {
+        } else if (bus.read_word(te_ptr + Self::TE_LINE_HEIGHT_OFFSET) as i16) <= 0
+            || (bus.read_word(te_ptr + Self::TE_FONT_ASCENT_OFFSET) as i16) < 0
+        {
+            // Startside's patch: a monostyled record keeps the lineHeight and fontAscent TENew gave it (or the
+            // application set): TECalText wraps lines but leaves them alone (Text 1993, 2-12 and 2-69). Recomputed
+            // here they grew to 16 and 12 for SimCity's Geneva 9 population field (12 and 10 on a Macintosh): its
+            // caret ran the field's full height and erasing the line wiped two rows of the field's frame.
             bus.write_word(te_ptr + Self::TE_LINE_HEIGHT_OFFSET, line_height as u16);
             bus.write_word(te_ptr + Self::TE_FONT_ASCENT_OFFSET, font_ascent as u16);
         }
@@ -3081,6 +3088,7 @@ impl super::TrapDispatcher {
         erase_background: bool,
         repaint: TeRepaint,
     ) {
+        let erase_text_rows_only = std::mem::take(&mut self.te_erase_text_rows_only);
         let te_ptr = Self::te_record_ptr(bus, te_handle);
         if te_ptr == 0 {
             return;
@@ -3307,13 +3315,26 @@ impl super::TrapDispatcher {
             clip_top = top.max(view_rect.0).min(view_rect.2);
         }
         if erase_background && clip_top < clip_bottom {
+            // Startside's patch: a caret blink or an activation erases only the rows the record's lines take (a
+            // monostyled record: nLines, at least one, times lineHeight), not the rest of the viewRect: SimCity's
+            // population field has a viewRect taller than its line, overlapping its 3-pixel frame, whose bottom two
+            // rows were wiped at every blink.
+            let mut erase_bottom = clip_bottom;
+            if erase_text_rows_only && !Self::te_is_styled_record(bus, te_ptr) {
+                let line_height = bus.read_word(te_ptr + Self::TE_LINE_HEIGHT_OFFSET) as i16;
+                let n_lines = (bus.read_word(te_ptr + Self::TE_N_LINES_OFFSET) as i16).max(1);
+                if line_height > 0 {
+                    let text_bottom = i32::from(dest_rect.0) + i32::from(n_lines) * i32::from(line_height);
+                    erase_bottom = clip_bottom.min(text_bottom.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16);
+                }
+            }
             self.draw_rect(
                 cpu,
                 bus,
                 &Rect {
                     top: clip_top,
                     left: clip_left,
-                    bottom: clip_bottom,
+                    bottom: erase_bottom,
                     right: clip_right,
                 },
                 ShapeOp::Erase,
@@ -16406,6 +16427,7 @@ impl super::TrapDispatcher {
                     bus.write_word(te_ptr + Self::TE_ACTIVE_OFFSET, 1);
                     bus.write_long(te_ptr + Self::TE_CARET_TIME_OFFSET, self.current_tick());
                     bus.write_word(te_ptr + Self::TE_CARET_STATE_OFFSET, 0);
+                    self.te_erase_text_rows_only = true;
                     self.draw_te_contents(cpu, bus, te_handle, true);
                 }
                 cpu.write_reg(Register::A7, sp + 4);
@@ -16430,6 +16452,7 @@ impl super::TrapDispatcher {
                 let te_ptr = Self::te_record_ptr(bus, te_handle);
                 if te_ptr != 0 {
                     bus.write_word(te_ptr + Self::TE_ACTIVE_OFFSET, 0);
+                    self.te_erase_text_rows_only = true;
                     self.draw_te_contents(cpu, bus, te_handle, true);
                 }
                 cpu.write_reg(Register::A7, sp + 4);
@@ -16556,6 +16579,11 @@ impl super::TrapDispatcher {
                     } else {
                         TeRepaint::Full
                     };
+                    let n_lines = |bus: &MacMemoryBus| {
+                        let te_ptr = Self::te_record_ptr(bus, te_handle);
+                        (te_ptr != 0).then(|| bus.read_word(te_ptr + Self::TE_N_LINES_OFFSET) as i16)
+                    };
+                    let lines_before = n_lines(bus);
                     buffer.apply_key(key);
                     self.te_commit_edit_buffer(bus, te_handle, &buffer);
 
@@ -16563,6 +16591,12 @@ impl super::TrapDispatcher {
                     // operation. Applications do not need to follow every
                     // key with TEUpdate; the TextEdit Manager redraws the
                     // affected text and insertion point itself.
+                    // Startside's patch: while no line goes away, only the lines' rows are erased (SimCity's
+                    // population field keeps its frame as digits are typed).
+                    self.te_erase_text_rows_only = matches!(
+                        (lines_before, n_lines(bus)),
+                        (Some(before), Some(after)) if after >= before
+                    );
                     self.draw_te_contents_region(cpu, bus, te_handle, true, repaint);
                 }
                 cpu.write_reg(Register::A7, sp + 6);
