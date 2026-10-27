@@ -16,7 +16,7 @@ use crate::quickdraw::text::{
     get_font_metrics, get_glyph, get_glyph_italic, get_underline_thickness, QuickDrawTextStyle,
 };
 use crate::ui_theme::{
-    render_scrollbar_bitmap, CaretState, ControlKind, ControlState, DialogFrameKind,
+    render_scrollbar_bitmap_at, CaretState, ControlKind, ControlState, DialogFrameKind,
     DialogFrameState, MenuBarState, MenuDropdownState, MenuItemState, MenuTitleState, Rgb8,
     TextFieldState, TextSelectionState, ThemeBitmap, ThemeDrawCtx, ThemeRect, UiThemeId,
 };
@@ -411,8 +411,11 @@ impl super::TrapDispatcher {
         if width <= 0 || height <= 0 {
             return true;
         }
-        let bitmap = render_scrollbar_bitmap(
+        // Startside's patch: drawn knowing where it lands, so its gray lines up with the screen's pattern grid.
+        let bitmap = render_scrollbar_bitmap_at(
             self.ui_theme_id(),
+            top,
+            left,
             width,
             height,
             value,
