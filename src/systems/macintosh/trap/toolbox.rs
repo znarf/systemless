@@ -10358,7 +10358,10 @@ impl super::TrapDispatcher {
                 let sp = cpu.read_reg(Register::A7);
                 let window_ptr = bus.read_long(sp);
                 cpu.write_reg(Register::A7, sp + 4);
-                self.draw_grow_icon(bus, window_ptr);
+                // Startside's patch: an application WDEF draws its own size box (wDrawGIcon).
+                if !self.arm_window_def_grow_icon(cpu, bus, window_ptr) {
+                    self.draw_grow_icon(bus, window_ptr);
+                }
                 Ok(())
             }
 
