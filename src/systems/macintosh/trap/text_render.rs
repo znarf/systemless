@@ -1206,7 +1206,10 @@ impl super::TrapDispatcher {
     pub(super) fn proportional_text_width(&self, base_total: i32) -> i16 {
         let face = crate::quickdraw::fonts::get_font_face_or_default(self.tx_font, self.tx_size);
         let denom = i32::from(face.size.max(1));
-        let size = i32::from(self.tx_size.max(1));
+        // txSize 0 is the font's own standard size (Inside Macintosh I-153): the
+        // face drawn, so no scaling. Taken as 1, MacPaint 1.0's tool icons
+        // measured 1 or 2 pixels wide and were centred 8 pixels off (Startside's patch).
+        let size = if self.tx_size <= 0 { denom } else { i32::from(self.tx_size) };
         ((base_total * size + denom / 2) / denom) as i16
     }
 }

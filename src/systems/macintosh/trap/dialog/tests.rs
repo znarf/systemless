@@ -194,6 +194,25 @@
         assert_eq!(default_item, 1);
     }
 
+    // Startside's patch: a disabled editText item (type $90) is still the field typing goes to (IM I-405);
+    // MacPaint 2.0's personalize dialog has only such fields.
+    #[test]
+    fn dialog_edit_state_takes_a_disabled_edit_text_item() {
+        let (_disp, _cpu, mut bus) = setup();
+        let dialog_ptr = bus.alloc(170);
+        bus.write_word(dialog_ptr + 164, 0xFFFF);
+        bus.write_word(dialog_ptr + 168, 1);
+        let items = vec![
+            DialogItem { item_type: 4, text: "OK".to_string(), ..Default::default() },
+            DialogItem { item_type: 4, text: "Cancel".to_string(), ..Default::default() },
+            DialogItem { item_type: 0x90, text: "Ann".to_string(), ..Default::default() },
+            DialogItem { item_type: 0x90, text: String::new(), ..Default::default() },
+        ];
+        let (text, edit_item, _) = TrapDispatcher::dialog_edit_state(&bus, dialog_ptr, &items);
+        assert_eq!(edit_item, 3);
+        assert_eq!(text, "Ann");
+    }
+
     #[test]
     fn dialog_edit_state_empty_live_handle_does_not_fallback_to_template_text() {
         let (_disp, _cpu, mut bus) = setup();
@@ -3937,8 +3956,8 @@
         let result = disp.dispatch_dialog(true, 0x17F, &mut cpu, &mut bus);
         assert!(result.unwrap().is_ok());
         assert_eq!(cpu.read_reg(Register::A7), TEST_SP + 4);
-        assert_eq!(bus.read_byte(TEST_SP + 4), 0);
-        assert_eq!(bus.read_byte(TEST_SP + 5), 0xA5);
+        // Startside's patch: the whole result word, so a caller testing it with TST.W (MacWrite 1.1) sees FALSE.
+        assert_eq!(bus.read_word(TEST_SP + 4), 0);
     }
 
     #[test]
@@ -3971,7 +3990,8 @@
         let result = disp.dispatch_dialog(true, 0x17F, &mut cpu, &mut bus);
         assert!(result.unwrap().is_ok());
         assert_eq!(bus.read_byte(TEST_SP + 4), 1);
-        assert_eq!(bus.read_byte(TEST_SP + 5), 0xA5);
+        // Startside's patch: TRUE is the whole word $0100.
+        assert_eq!(bus.read_word(TEST_SP + 4), 0x0100);
         let trace = disp.input_trace_text();
         assert!(trace.contains("A97F action=guest_event:mouseDown"));
         assert!(trace.contains("tracking=menu:idle dialog:idle control:idle"));
@@ -4135,7 +4155,8 @@
         assert!(result.unwrap().is_ok());
         assert_eq!(cpu.read_reg(Register::A7), TEST_SP + 12);
         assert_eq!(bus.read_byte(TEST_SP + 12), 1);
-        assert_eq!(bus.read_byte(TEST_SP + 13), 0xA5);
+        // Startside's patch: the whole result word.
+        assert_eq!(bus.read_word(TEST_SP + 12), 0x0100);
         assert_eq!(bus.read_long(dialog_out_ptr), dialog_ptr);
         assert_eq!(bus.read_word(item_hit_ptr), 1);
         let trace = disp.input_trace_text();
@@ -9422,6 +9443,25 @@
             screen_pixel_is_set(&bus, screen_base, row_bytes, 67, 69),
             "retained redraw should preserve the selected radio dot"
         );
+    }
+
+    // Startside's patch: a retained redraw draws a statText whose rect runs under the button before the button,
+    // as DrawDialog does: MacPaint's About box lost its OK button's left half.
+    #[test]
+    fn retained_redraw_draws_controls_after_overlapping_static_text() {
+        let screen_base = 0x300000u32;
+        let row_bytes = 64u32;
+        let bounds = (40, 40, 120, 220);
+        let dialog_ptr = 0x2000;
+        let items = vec![
+            DialogItem { item_type: 4, rect: (20, 20, 40, 100), text: "OK".to_string(), ..Default::default() },
+            DialogItem { item_type: 0x88, rect: (24, 0, 40, 170), text: "x".to_string(), ..Default::default() },
+        ];
+        let (mut disp, _cpu, mut bus) = setup();
+        disp.set_screen_mode_for_test(screen_base, row_bytes, 512, 342, 1);
+        disp.redraw_standard_dialog_items(&mut bus, bounds, &items, 0, "", 0, dialog_ptr, None);
+        // The button's left edge (x = 40 + 20), in the rows the statText covers.
+        assert!(screen_pixel_is_set(&bus, screen_base, row_bytes, 60, 70) || screen_pixel_is_set(&bus, screen_base, row_bytes, 61, 70));
     }
 
     #[test]

@@ -6173,6 +6173,13 @@ impl super::TrapDispatcher {
             // (4 bytes). Pop 8 bytes.
             // GetIndString ($A9E6): Looks up STR# resource by ID, returns 1-based indexed Pascal string per IM:I I-468; empty string on not-found or out-of-range. Trap-word $A9E6 repurposed by Apple System 7+ from legacy InitAllPacks (per IM:III line 9512 master dispatch table) — same trap-word-repurposing pattern as $A056 LwrString→LowerText family per IM:VI 30881. System 6 InitAllPacks callers would dereference stale stack values via Systemless's GetIndString frame; no current corpus title is System 6 era.
             (true, 0x1E6) => {
+                // Startside's patch: InitAllPacks (Inside Macintosh I, the Package Manager; $A9E6 in its trap list) for the applications of
+                // 1984-89, which call it once at start with nothing on the stack: read as GetIndString, it popped 8
+                // bytes, MacWrite 1.1 lost its return address and quit right after its printer setup. The packages
+                // load when first called, so there is nothing to do.
+                if self.pre_multifinder_app {
+                    return Some(Ok(()));
+                }
                 let sp = cpu.read_reg(Register::A7);
                 let pc = cpu.read_reg(Register::PC);
                 // Stack layout: SP+0=index, SP+2=strListID, SP+4=theString (VAR ptr)
@@ -10646,7 +10653,14 @@ impl super::TrapDispatcher {
                 let font_num = bus.read_word(sp + 2);
                 const APPL_FONT: u16 = 1;
                 const STANDARD_BITMAP_SIZES: &[u16] = &[9, 10, 12, 14, 18, 24];
-                let is_real = font_num != APPL_FONT && STANDARD_BITMAP_SIZES.contains(&size);
+                // Startside's patch: a family the disk's fonts hold answers
+                // from them (the MacPaint floppy's Athens: 18 only; its
+                // FontSize menu outlines that one, as on the real machine).
+                let is_real = if crate::quickdraw::fonts::resource_family_known(font_num as i16) {
+                    crate::quickdraw::fonts::resource_face_is_real(font_num as i16, size as i16)
+                } else {
+                    font_num != APPL_FONT && STANDARD_BITMAP_SIZES.contains(&size)
+                };
                 let bool_value: u16 = if is_real { 0x0100 } else { 0x0000 };
                 bus.write_word(sp + 4, bool_value);
                 cpu.write_reg(Register::A7, sp + 4);

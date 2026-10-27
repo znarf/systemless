@@ -260,7 +260,11 @@ impl super::TrapDispatcher {
         // Driver presence is a capability probe. Keep this list limited to
         // services backed by the HLE: AppleTalk's .MPP/.ATP/.XPP drivers must
         // remain absent until their control, status, and protocol paths exist.
-        [".AIn", ".AOut", ".BIn", ".BOut"]
+        // `.Print`: applications of 1984-85 (MacWrite 1.1) carry their own
+        // Printing Manager code (PrLink, before _PrGlue) and open the driver
+        // by name as they start, quitting when it's missing; it accepts their
+        // calls and prints nothing (Startside's patch).
+        [".AIn", ".AOut", ".BIn", ".BOut", ".Print"]
             .iter()
             .any(|driver| filename.eq_ignore_ascii_case(driver))
     }
@@ -3925,6 +3929,18 @@ impl super::TrapDispatcher {
                 );
 
                 let signed_ref_num = ref_num as i16;
+                // StartSound with a completion routine: queued, done when it
+                // has played (Inside Macintosh Volume II, II-231; Startside's patch).
+                if signed_ref_num == -4
+                    && matches!(
+                        raw_trap_route(self.current_trap_word).os_routine_variant,
+                        OsRoutineVariant::ParameterBlockAsynchronous
+                    )
+                {
+                    self.queue_legacy_sound_driver_write(bus, pb, buffer, request_count);
+                    cpu.write_reg(Register::D0, 0);
+                    return Some(Ok(()));
+                }
                 if signed_ref_num < 0 {
                     let result =
                         self.write_device_driver(bus, signed_ref_num, buffer, request_count);
@@ -4605,6 +4621,10 @@ impl super::TrapDispatcher {
             //   pbkillio_writes_same_oserr_to_d0_and_ioresult_preserving_stack
             (false, 0x06) => {
                 let pb = cpu.read_reg(Register::A0);
+                // The Sound Driver has a queue now (Startside's patch).
+                if pb != 0 && bus.read_word(pb + 24) as i16 == -4 {
+                    self.kill_legacy_sound_driver_io(bus);
+                }
                 bus.write_word(pb + 16, 0); // noErr → pb.ioResult
                 cpu.write_reg(Register::D0, 0); // noErr → D0
                 Ok(())

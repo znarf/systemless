@@ -170,6 +170,12 @@ impl MachineProfile {
     /// the same way as [`Self::screen_row_bytes`].
     pub const fn screen_row_bytes_at_depth(self, depth: u16) -> u32 {
         let bytes = (self.screen_width as u32 * depth as u32).div_ceil(8);
+        // The compact Macs' built-in 512 x 342 screen has exactly 64 bytes a
+        // row, and software of 1984-89 that draws straight into it (MacPaint)
+        // counts on it (Startside's patch).
+        if self.screen_width == 512 && depth == 1 {
+            return 64;
+        }
         (bytes / 16 + 1) * 16
     }
 }
@@ -227,8 +233,19 @@ pub(crate) const REFERENCE_POWERPC_EXECUTION_CAPABILITIES: GuestExecutionCapabil
 pub fn reference_machine_profile() -> MachineProfile {
     // Resolved once: callers include per-pixel geometry helpers, and parsing
     // the environment on every query showed up as a frame-time regression.
-    static RESOLVED: std::sync::OnceLock<MachineProfile> = std::sync::OnceLock::new();
     *RESOLVED.get_or_init(resolve_reference_machine_profile)
+}
+
+static RESOLVED: std::sync::OnceLock<MachineProfile> = std::sync::OnceLock::new();
+
+/// Startside's patch: a browser has no environment, so its embedder sets the
+/// screen and memory here, before the first runner (false once resolved).
+pub fn set_reference_screen(width: u16, height: u16, ram_size_bytes: u32) -> bool {
+    let mut p = REFERENCE_MACHINE_PROFILE;
+    p.screen_width = width;
+    p.screen_height = height;
+    p.ram_size_bytes = ram_size_bytes;
+    RESOLVED.set(p).is_ok()
 }
 
 fn resolve_reference_machine_profile() -> MachineProfile {

@@ -4390,13 +4390,21 @@ impl super::TrapDispatcher {
 
                             if pt_v >= r_top && pt_v < r_bottom && pt_h >= r_left && pt_h < r_right
                             {
-                                found_handle = ctrl_handle;
-                                // Return part code 10 (kControlButtonPart) for
-                                // simple button controls. The proper approach
-                                // would call the CDEF's testCntl, but for HLE
-                                // we return a generic hit indicator.
-                                found_part = 10;
-                                break;
+                                // Startside's patch: the part TestControl gives (IM I-323: FindControl
+                                // calls the control's TestControl), not 10 for every control: a scroll bar's
+                                // arrows, page areas and thumb all came back as inButton, and SimCity's
+                                // edit window, which branches on them, never scrolled by its arrows.
+                                let part = match self.control_manager.proc_id(ctrl_ptr) {
+                                    16 => self.standard_scrollbar_testcontrol_part_code(
+                                        bus, ctrl_ptr, pt_v, pt_h,
+                                    ),
+                                    _ => self.standard_testcontrol_part_code(ctrl_ptr),
+                                };
+                                if part != 0 {
+                                    found_handle = ctrl_handle;
+                                    found_part = part;
+                                    break;
+                                }
                             }
                         }
 

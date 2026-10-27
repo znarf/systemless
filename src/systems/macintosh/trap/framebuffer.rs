@@ -5158,8 +5158,14 @@ impl super::TrapDispatcher {
 
         // Title bar area: drawn ABOVE the content rect
         // Clamp to menu bar height — the Window Manager never draws
-        // chrome into the menu bar area.
-        let menu_bar_height = bus.read_word(crate::memory::globals::addr::MBAR_HEIGHT) as i16;
+        // chrome into the menu bar area. Startside's patch: unless windows
+        // may cover it (the 64K and 128K ROMs): a frame above the screen
+        // stays there, not a line under the menu bar (Tetris).
+        let menu_bar_height = if self.menu_bar_clips_windows {
+            bus.read_word(crate::memory::globals::addr::MBAR_HEIGHT) as i16
+        } else {
+            0
+        };
         let chrome = crate::window_manager::standard_window_chrome(
             self.window_bounds,
             menu_bar_height,
@@ -6151,7 +6157,7 @@ impl super::TrapDispatcher {
         self.restore_kiosk_dialog_desktop_background(bus);
         self.restore_window_manager_desktop(bus);
 
-        if !self.menus.is_empty() && !self.fullscreen_locked && !self.menu_bar_hidden {
+        if !self.menus.is_empty() && !self.fullscreen_locked && !self.menu_bar_hidden && self.menu_bar_redrawn_each_frame {
             self.refresh_menus_from_memory(bus);
             self.draw_menu_bar_to_fb(bus);
         }

@@ -1838,6 +1838,19 @@
         );
     }
 
+    // Startside's patch: in 24-bit mode SetPort ignores a port pointer's top byte (a locked handle's flags).
+    #[test]
+    fn setport_ignores_the_top_byte_in_24_bit_mode() {
+        let (mut d, mut cpu, mut bus) = setup_with_port();
+        let port = *d.current_port;
+        bus.set_addressing_32_bit(false);
+        bus.write_long(TEST_SP, port | 0x8000_0000);
+        let result = d.dispatch_quickdraw(true, 0x073, &mut cpu, &mut bus);
+        assert!(result.unwrap().is_ok());
+        assert_eq!(cpu.read_reg(Register::A7), TEST_SP + 4);
+        assert_eq!(*d.current_port, port & 0x00FF_FFFF);
+    }
+
     #[test]
     fn setport_preserves_current_gdevice_selected_by_setgdevice() {
         // Imaging With QuickDraw 1994 p. 5-24 documents the legacy offscreen
@@ -5251,6 +5264,17 @@
         assert!(result.unwrap().is_ok());
         assert_eq!(cpu.read_reg(Register::A7), TEST_SP + 2);
         assert_eq!(d.tx_face, 1);
+    }
+
+    // Startside's patch: a pre-MultiFinder application's style is the word's low byte, whatever the high one holds.
+    #[test]
+    fn text_face_reads_the_low_byte_for_a_pre_multifinder_application() {
+        let (mut d, mut cpu, mut bus) = setup();
+        d.pre_multifinder_app = true;
+        bus.write_word(TEST_SP, 0x1C00u16); // plain, with a left-over register byte above it (MacWrite 1.1)
+        let result = d.dispatch_quickdraw(true, 0x088, &mut cpu, &mut bus);
+        assert!(result.unwrap().is_ok());
+        assert_eq!(d.tx_face, 0);
     }
 
     #[test]

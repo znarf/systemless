@@ -1462,6 +1462,13 @@ pub struct TrapDispatcher {
     /// Address of the lazily-allocated trampoline template used by the
     /// Window Manager to call a guest WDEF procedure.
     pub(crate) window_def_trampoline: u32,
+    /// Startside's patch: the code FindWindow runs to ask an application WDEF its wHit (see window.rs).
+    pub(crate) find_window_hit_stub: u32,
+    /// Startside's patch: application-WDEF windows whose highlight changed, to redraw with wDraw at the trap's end.
+    pub(crate) pending_wdef_redraws: Vec<u32>,
+    /// Startside's patch: counts writes to the virtual disk (a file's data or resources, a file removed), so an
+    /// embedder can look for changed files only when something was written.
+    pub(crate) vfs_write_generation: u64,
     /// Address of the lazily-allocated trampoline template used by the
     /// Control Manager to call a guest CDEF procedure.
     pub(crate) control_def_trampoline: u32,
@@ -1612,6 +1619,10 @@ pub struct TrapDispatcher {
     /// Guest SndChannel storage used by writes to the ROM Sound Driver
     /// reference number (-4). Allocated lazily on the first StartSound write.
     pub(crate) legacy_sound_driver_channel: Option<u32>,
+    /// Asynchronous writes to the Sound Driver, oldest first: the first plays,
+    /// the others wait their turn in the driver's I/O queue (Startside's patch).
+    pub(crate) legacy_sound_driver_requests:
+        VecDeque<super::sound::LegacySoundDriverRequest>,
     /// Process-owned refnums whose access paths grant write permission.
     /// Files 1992, pp. 2-7--2-8 and 2-121 defines permission as access-path
     /// state and `wrPermErr` (-61) for writes through a read-only path.
@@ -1821,6 +1832,25 @@ pub struct TrapDispatcher {
     /// Guest-controlled runners default to `false`; explicit frontend policy
     /// may set it while leaving `fullscreen_locked` to model guest state.
     pub menu_bar_hidden: bool,
+    /// Startside's patch: false, the menu bar is drawn only when the guest asks
+    /// (DrawMenuBar, menu tracking), as on the real machine, where a game
+    /// drawing over it covers it; true (the default), redrawn every frame.
+    pub menu_bar_redrawn_each_frame: bool,
+    /// Startside's patch: true, AddResMenu('DRVR') adds nothing: a disk's own
+    /// System file opened beneath the application doesn't put its desk
+    /// accessories in the Apple menu (they ran half-working, and broke the
+    /// application's own clicks).
+    pub desk_accessories_hidden: bool,
+    /// Startside's patch: an application without a SIZE resource, older than MultiFinder (1987): $A9E6 is
+    /// InitAllPacks for it (no arguments; GetIndString otherwise), and TextFace reads the style in the low
+    /// byte of its word, as the Pascal of 1984 pushed it.
+    pub(crate) pre_multifinder_app: bool,
+    /// Startside's patch: false, a window's visRgn may cover the menu bar's
+    /// rows, as with the 64K and 128K ROMs' Window Manager (Macintosh 128K to
+    /// Plus): a 1988 game opening its window over the whole screen (Tetris)
+    /// draws from the top; true (the default), the menu bar is kept out of
+    /// every window, as from the SE's and Mac II's ROMs (IM V-245).
+    pub menu_bar_clips_windows: bool,
     /// Sound Manager state (channels, playback buffers).
     pub(crate) sound_manager: SharedProcessSoundManager,
     /// Menus loaded from MENU resources, in order of insertion
@@ -2321,6 +2351,9 @@ pub struct TrapDispatcher {
     /// Saved visRgn for active BeginUpdate/EndUpdate pairs, keyed by window.
     /// Inside Macintosh Volume I, I-292 to I-293
     pub(crate) saved_vis_regions: FastHashMap<u32, (i16, i16, i16, i16)>,
+    /// Startside's patch: the port's portBits.bounds top-left at BeginUpdate, the coordinates EndUpdate gives the
+    /// visRgn back in (an application may have swapped portBits meanwhile).
+    pub(crate) saved_update_bounds: FastHashMap<u32, (i16, i16)>,
     /// Process-owned List Manager state shared with native execution.
     pub(crate) list_states: SharedProcessListManager,
     pub(crate) collections: SharedProcessCollectionManager,
@@ -3828,6 +3861,9 @@ impl TrapDispatcher {
             device_loop_trampoline: 0,
             list_def_trampoline: 0,
             window_def_trampoline: 0,
+            find_window_hit_stub: 0,
+            pending_wdef_redraws: Vec::new(),
+            vfs_write_generation: 0,
             control_def_trampoline: 0,
             control_def_trampoline_chain: Vec::new(),
             control_callback_stack: Vec::new(),
@@ -3869,6 +3905,7 @@ impl TrapDispatcher {
             open_files,
             synthetic_drivers: HashMap::default(),
             legacy_sound_driver_channel: None,
+            legacy_sound_driver_requests: VecDeque::new(),
             write_refnums,
             file_positions,
             recent_file_read: None,
@@ -3934,6 +3971,10 @@ impl TrapDispatcher {
             menu_bar_policy: crate::runner::MenuBarPolicy::GuestControlled,
             initial_kiosk_guest_hide_observed: false,
             menu_bar_hidden: false,
+            menu_bar_redrawn_each_frame: true,
+            desk_accessories_hidden: false,
+            pre_multifinder_app: false,
+            menu_bar_clips_windows: true,
             sound_manager: SharedProcessSoundManager::default(),
             menus: Vec::new(),
             menu_tracking,
@@ -4119,6 +4160,7 @@ impl TrapDispatcher {
             pending_modal_button_dispose_dialog: None,
             window_stack: Vec::new(),
             saved_vis_regions: HashMap::default(),
+            saved_update_bounds: HashMap::default(),
             list_states: SharedProcessListManager::default(),
             collections: SharedProcessCollectionManager::default(),
             drag_manager: SharedProcessDragManager::default(),
@@ -5133,6 +5175,7 @@ impl TrapDispatcher {
     }
 
     pub(crate) fn touch_vfs_entry(&mut self, name: &str) {
+        self.vfs_write_generation = self.vfs_write_generation.wrapping_add(1); // Startside's patch
         let normalized = Self::normalize_vfs_path(name);
         self.ensure_vfs_file_metadata(&normalized);
         let timestamp = self.allocate_vfs_timestamp();
@@ -5166,6 +5209,7 @@ impl TrapDispatcher {
     }
 
     pub fn remove_vfs_path(&mut self, name: &str) -> bool {
+        self.vfs_write_generation = self.vfs_write_generation.wrapping_add(1); // Startside's patch
         let normalized = Self::normalize_vfs_path(name);
         if normalized.is_empty() {
             return false;

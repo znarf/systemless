@@ -569,6 +569,20 @@ impl super::TrapDispatcher {
             let port = *self.current_port;
             self.load_port_draw_state(bus, port);
         }
+        // Startside's patch: text drawn and measured in the port's own font,
+        // size, style and mode. 1984 code (MacPaint) sets them by writing
+        // thePort^.txFont and its neighbours, without TextFont, TextFace or
+        // TextSize: GrafPort fields are the state (IM I-152), the traps only
+        // one way to change them.
+        if is_tool && matches!(trap_num, 0x083..=0x086 | 0x08B..=0x08D) {
+            let port = *self.current_port;
+            if port != 0 {
+                self.tx_font = bus.read_word(port + 68) as i16;
+                self.tx_face = decode_text_face_style(bus.read_word(port + 70));
+                self.tx_mode = bus.read_word(port + 72) as i16;
+                self.tx_size = bus.read_word(port + 74) as i16;
+            }
+        }
         Some(match (is_tool, trap_num) {
             // ========== QuickDraw Initialization ==========
 
@@ -891,7 +905,11 @@ impl super::TrapDispatcher {
             // Inside Macintosh Volume I, p. I-165.
             (true, 0x073) => {
                 let sp = cpu.read_reg(Register::A7);
-                let port = bus.read_long(sp);
+                // Startside's patch: in 24-bit mode a port pointer's top byte is ignored, as the hardware did.
+                // MacWrite 1.1 keeps its line buffer's GrafPort in a locked handle and passes the master
+                // pointer with its lock flag: refused as outside RAM, its SetPortBits then landed on the
+                // document window, whose drawing went to the buffer from then on.
+                let port = bus.translate_guest_address(bus.read_long(sp));
                 cpu.write_reg(Register::A7, sp + 4);
                 if trace_dialog_ports_enabled() {
                     eprintln!(
@@ -1929,7 +1947,14 @@ impl super::TrapDispatcher {
             // TextFace ($A888): Sets style (bold, italic, etc.)
             (true, 0x088) => {
                 let sp = cpu.read_reg(Register::A7);
-                self.tx_face = decode_text_face_style(bus.read_word(sp));
+                // Startside's patch: for an application older than MultiFinder the style is the word's low byte,
+                // whatever its high byte holds: MacWrite 1.1 pushes the word from a register whose high byte is
+                // left over, and its plain text came out outlined, shadowed and underlined.
+                self.tx_face = if self.pre_multifinder_app {
+                    (bus.read_word(sp) & 0x00FF) as i16
+                } else {
+                    decode_text_face_style(bus.read_word(sp))
+                };
                 cpu.write_reg(Register::A7, sp + 2);
                 self.sync_current_port_draw_state(bus);
                 if let Some((_, _, _, _, _, commands)) = self.recording_picture.as_mut() {
@@ -2057,6 +2082,9 @@ impl super::TrapDispatcher {
                     i32::from(self.missing_glyph_advance())
                 };
                 let advance = self.proportional_text_width(advance);
+                if std::env::var_os("ZZ_CHARWIDTH").is_some() {
+                    eprintln!("[CHARWIDTH] font {} size {} ch {:?} -> {}", self.tx_font, self.tx_size, ch, advance);
+                }
                 bus.write_word(sp + 2, advance as u16);
                 cpu.write_reg(Register::A7, sp + 2);
                 Ok(())
@@ -2117,6 +2145,12 @@ impl super::TrapDispatcher {
                         ch,
                     );
                 }
+                if std::env::var_os("ZZ_CHARWIDTH").is_some() {
+                    let port = *self.current_port;
+                    eprintln!("[DRAWCHAR] font {} size {} mode {} ch {:?} port ${:08X} bits ${:08X} rowBytes {} bounds ({},{},{},{}) pn {:?}", self.tx_font, self.tx_size, self.tx_mode, ch, port,
+                        bus.read_long(port + 2), bus.read_word(port + 6) & 0x3FFF, bus.read_word(port + 8) as i16, bus.read_word(port + 10) as i16,
+                        bus.read_word(port + 12) as i16, bus.read_word(port + 14) as i16, self.pn_loc);
+                }
                 self.draw_char(cpu, bus, ch);
                 self.refresh_visible_dialog_snapshot_for_port(bus, *self.current_port);
                 Ok(())
@@ -2174,6 +2208,10 @@ impl super::TrapDispatcher {
                         .saturating_add(self.proportional_text_width(advance));
                     self.sync_current_port_draw_state(bus);
                     return Some(Ok(()));
+                }
+                if std::env::var_os("ZZ_CHARWIDTH").is_some() {
+                    let len = usize::from(bus.read_byte(str_ptr));
+                    eprintln!("[DRAWSTRING] font {} size {} face {} port ${:08X} {:?}", self.tx_font, self.tx_size, self.tx_face, *self.current_port, String::from_utf8_lossy(&bus.read_bytes(str_ptr + 1, len)));
                 }
                 self.draw_string(cpu, bus, str_ptr);
                 self.refresh_visible_dialog_snapshot_for_port(bus, *self.current_port);
@@ -3184,8 +3222,11 @@ impl super::TrapDispatcher {
                 let mode = bus.read_word(sp + 4) as i16;
                 let dst_rect_ptr = bus.read_long(sp + 6);
                 let src_rect_ptr = bus.read_long(sp + 10);
-                let dst_bits_ptr = bus.read_long(sp + 14);
-                let src_bits_ptr = bus.read_long(sp + 18);
+                // Startside's patch: in 24-bit mode a BitMap pointer's top byte is ignored, as the hardware did:
+                // MacWrite 1.1 passes its line buffer's BitMap through a locked handle's master pointer (the
+                // lock flag in that byte), which read as outside RAM and made every line's blit a no-op.
+                let dst_bits_ptr = bus.translate_guest_address(bus.read_long(sp + 14));
+                let src_bits_ptr = bus.translate_guest_address(bus.read_long(sp + 18));
                 cpu.write_reg(Register::A7, sp + 22);
 
                 // Nil source or destination bitmap pointers are inert. This

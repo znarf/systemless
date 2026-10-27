@@ -438,8 +438,20 @@ fn normalize_boolean_transfer_mode(mode: i16) -> i16 {
     match mode {
         0..=3 => mode,
         8..=11 => mode - 8,
+        // Startside's patch: notPatCopy..notPatBic are patCopy..patBic with
+        // the pattern inverted (`pattern_inverted`), not patCopy. MacPaint 1's
+        // paint bucket masks its fill with PenMode(notPatBic) + PaintRect, and
+        // drawn as patCopy that flooded the whole window.
+        // Inside Macintosh I, I-157 (pattern transfer modes).
+        12..=15 => mode - 12,
         _ => 0,
     }
+}
+
+/// Startside's patch: the notPat modes (12..15) draw with the pattern's bits
+/// inverted (Inside Macintosh I, I-157: notPatBic is dst AND pattern).
+fn pattern_inverted(mode: i16) -> bool {
+    (12..=15).contains(&mode)
 }
 
 /// What a whole-row 1bpp operation does to every bit of the clipped rect.
@@ -515,6 +527,7 @@ fn invert_indexed_pixel(old: u8) -> u8 {
 }
 
 fn apply_boolean_transfer_1(old: bool, mode: i16, source_is_black: bool) -> bool {
+    let source_is_black = source_is_black != pattern_inverted(mode);
     match normalize_boolean_transfer_mode(mode) {
         0 => source_is_black,
         1 => old || source_is_black,
@@ -531,6 +544,7 @@ fn apply_boolean_transfer_8(
     fg_idx: u8,
     bg_idx: u8,
 ) -> u8 {
+    let source_is_black = source_is_black != pattern_inverted(mode);
     match normalize_boolean_transfer_mode(mode) {
         0 => {
             if source_is_black {
@@ -571,6 +585,7 @@ fn apply_boolean_transfer_32(
     fg_color: u32,
     bg_color: u32,
 ) -> u32 {
+    let source_is_black = source_is_black != pattern_inverted(mode);
     match normalize_boolean_transfer_mode(mode) {
         0 => {
             if source_is_black {
@@ -1573,6 +1588,9 @@ impl super::TrapDispatcher {
         let touch_left = r.left.max(clip_left);
         let touch_bottom = r.bottom.min(clip_bottom);
         let touch_right = r.right.min(clip_right);
+        if std::env::var_os("ZZ_CHARWIDTH").is_some() {
+            eprintln!("[SHAPE] {op:?} port ${port:08X} base ${pix_base:08X} rb {pix_row_bytes} bounds ({bounds_top},{bounds_left},{bounds_bottom},{bounds_right}) rect ({},{},{},{}) clip ({clip_top},{clip_left},{clip_bottom},{clip_right})", r.top, r.left, r.bottom, r.right);
+        }
         let touched_screen =
             pix_base == self.screen_mode.0 && touch_top < touch_bottom && touch_left < touch_right;
         if touched_screen {
@@ -2024,7 +2042,10 @@ impl super::TrapDispatcher {
                 ShapeOp::Invert => Some(BitRowOp::Toggle),
                 ShapeOp::Erase => solid_bit_row_op(self.bk_pat),
                 ShapeOp::Fill(pattern) => solid_bit_row_op(pattern),
-                ShapeOp::Paint if normalize_boolean_transfer_mode(self.pn_mode) == 0 => {
+                ShapeOp::Paint
+                    if normalize_boolean_transfer_mode(self.pn_mode) == 0
+                        && !pattern_inverted(self.pn_mode) =>
+                {
                     solid_bit_row_op(self.pn_pat)
                 }
                 _ => None,
@@ -2705,7 +2726,12 @@ impl super::TrapDispatcher {
         bk_pat: [u8; 8],
     ) -> Option<u8> {
         let pattern = match op {
-            ShapeOp::Paint if normalize_boolean_transfer_mode(self.pn_mode) == 0 => pn_pat,
+            ShapeOp::Paint
+                if normalize_boolean_transfer_mode(self.pn_mode) == 0
+                    && !pattern_inverted(self.pn_mode) =>
+            {
+                pn_pat
+            }
             ShapeOp::Erase => bk_pat,
             ShapeOp::Fill(pattern) => *pattern,
             _ => return None,
@@ -2865,6 +2891,20 @@ mod tests {
         assert_eq!(normalize_boolean_transfer_mode(3), 3);
         assert_eq!(normalize_boolean_transfer_mode(8), 0);
         assert_eq!(normalize_boolean_transfer_mode(11), 3);
+    }
+
+    // Startside's patch: notPatBic keeps only the pattern's black pixels
+    // (Inside Macintosh I, I-157), as MacPaint 1's paint bucket relies on.
+    #[test]
+    fn not_pattern_modes_invert_the_pattern() {
+        assert_eq!(normalize_boolean_transfer_mode(15), 3);
+        assert!(apply_boolean_transfer_1(true, 15, true));
+        assert!(!apply_boolean_transfer_1(true, 15, false));
+        assert!(!apply_boolean_transfer_1(false, 15, true));
+        assert!(!apply_boolean_transfer_1(true, 12, true));
+        assert!(apply_boolean_transfer_1(false, 13, false));
+        assert_eq!(apply_boolean_transfer_8(77, 15, false, 255, 0), 0);
+        assert_eq!(apply_boolean_transfer_8(77, 15, true, 255, 0), 77);
     }
 
     #[test]

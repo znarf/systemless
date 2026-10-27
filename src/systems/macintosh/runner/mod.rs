@@ -309,6 +309,11 @@ fn trace_timer_enabled() -> bool {
     *TRACE_TIMER.get_or_init(|| std::env::var_os("SYSTEMLESS_TRACE_TIMER").is_some())
 }
 
+/// Startside's patch: the level-1 interrupt autovector (vector 25) and the RTE it holds until an
+/// application installs its own handler.
+const LEVEL1_AUTOVECTOR: u32 = 0x0064;
+const DEFAULT_LEVEL1_HANDLER: u32 = 0x0000_00FE;
+
 fn trace_vbl_enabled() -> bool {
     *TRACE_VBL.get_or_init(|| std::env::var_os("SYSTEMLESS_TRACE_VBL").is_some())
 }
@@ -2017,7 +2022,9 @@ impl FixtureRunner {
         let profile = crate::machine_profile::reference_machine_profile();
         let visible_row_bytes =
             (u32::from(profile.screen_width) * u32::from(config.screen_depth)).div_ceil(8);
-        let row_bytes = (visible_row_bytes / 16 + 1) * 16;
+        // The profile's own row size (64 bytes on the compact Macs' screen).
+        let _ = visible_row_bytes;
+        let row_bytes = profile.screen_row_bytes_at_depth(config.screen_depth);
         dispatcher.screen_mode = (
             bus.read_long(crate::memory::globals::addr::SCRN_BASE),
             row_bytes,
@@ -2863,6 +2870,18 @@ impl FixtureRunner {
         )
     }
 
+    /// The 68K's D0-D7 then A0-A7 (a diagnostic for embedders: Startside's patch).
+    pub fn m68k_registers(&self) -> [u32; 16] {
+        use Register::*;
+        let r = [D0, D1, D2, D3, D4, D5, D6, D7, A0, A1, A2, A3, A4, A5, A6, A7];
+        r.map(|reg| self.m68k.cpu.read_reg(reg))
+    }
+
+    /// The program counter now (a diagnostic for embedders: Startside's patch).
+    pub fn program_counter(&self) -> u32 {
+        self.current_oracle_pc()
+    }
+
     fn current_oracle_pc(&self) -> u32 {
         self.native
             .application()
@@ -3615,6 +3634,17 @@ impl FixtureRunner {
         Ok(())
     }
 
+    /// Startside's patch: the virtual disk's write counter (see `vfs_write_generation`), cheap to poll.
+    pub fn vfs_write_generation(&self) -> u64 {
+        self.dispatcher.vfs_write_generation
+    }
+
+    /// Startside's patch: the paths whose data fork the application has open now (FSOpen/PBOpen not yet closed):
+    /// a file still open may be half written, an embedder keeping saves waits for its close.
+    pub fn open_vfs_paths(&self) -> Vec<String> {
+        self.dispatcher.open_files.iter().map(|record| record.path.clone()).collect()
+    }
+
     pub fn remove_vfs_file(&mut self, path: &str) -> bool {
         self.dispatcher.remove_vfs_path(path)
     }
@@ -4102,6 +4132,8 @@ impl FixtureRunner {
         let high_level_event_aware = app
             .size_resource
             .is_some_and(ApplicationSizeResource::is_high_level_event_aware);
+        // Startside's patch: an application older than MultiFinder (no SIZE resource): see `pre_multifinder_app`.
+        self.dispatcher.pre_multifinder_app = app.size_resource.is_none();
         self.dispatcher
             .apple_event_launch_state
             .reset_for_launch(high_level_event_aware);
@@ -4332,6 +4364,7 @@ impl FixtureRunner {
         // guest startup code can read the zone header directly.
         // Inside Macintosh: Memory (1992), pp. 2-20 and 2-88.
         self.bus.write_word(visible_zone_start + 20, 64);
+        crate::trap::publish_heap_walk_block(&mut self.bus, visible_zone_start);
         self.bus.write_long(
             visible_zone_start + 56,
             visible_zone_start + zone_header_size,
@@ -4548,9 +4581,13 @@ impl FixtureRunner {
         // application. Startup INITs and application code can then find its
         // resources through GetResource. Inside Macintosh Volume I (1985),
         // pp. I-125–I-126.
+        // A 400K MFS disk of 1984-85 has no folders: its System file is at
+        // the volume's top ("Write/System"), as the Finder showed it
+        // (Startside's patch).
         if let Some(system_file) = self.vfs_file_summaries_where(|path| {
             let path = path.to_ascii_lowercase();
             path.ends_with("/system folder/system")
+                || (path.matches('/').count() == 1 && path.ends_with("/system"))
         }).into_iter().next() {
             if self.dispatcher.vfs_rsrc.contains_key(&system_file.path) {
                 let refnum = self.dispatcher.open_resource_file_from_vfs_key(
@@ -5219,12 +5256,18 @@ impl FixtureRunner {
                 self.dispatcher.sound_manager.legacy_speaker_muted,
             );
             if samples.is_empty() {
+                self.dispatcher
+                    .service_legacy_sound_driver_requests(&mut self.bus);
                 self.queue_host_silence_audio(remaining_samples);
                 self.dispatcher
                     .release_finished_internal_sound_channels(&mut self.bus);
                 break;
             }
             self.queue_mixed_audio(&samples);
+            // A Sound Driver request played out: completed, the next started
+            // (Startside's patch).
+            self.dispatcher
+                .service_legacy_sound_driver_requests(&mut self.bus);
             self.dispatcher
                 .release_finished_internal_sound_channels(&mut self.bus);
             remaining_samples -= chunk;
@@ -10730,7 +10773,22 @@ impl FixtureRunner {
         self.fire_vbl_tasks();
         self.fire_timer_tasks(new_tick);
         self.fire_deferred_task();
+        self.raise_patched_level1_interrupt();
         new_tick
+    }
+
+    /// Startside's patch: a level-1 interrupt through the guest's own handler at each retrace, once the
+    /// application has replaced the autovector at $64. SimCity 1.11 runs its simulation as a second
+    /// thread switched in from that handler; never called, its city never aged (1900 Jan for ever).
+    /// The VIA's level-1 interrupt is the retrace's (Inside Macintosh III-22; the vector, I-103).
+    fn raise_patched_level1_interrupt(&mut self) {
+        if self.callback_suspends_guest_clock()
+            || self.bus.read_long(LEVEL1_AUTOVECTOR) == DEFAULT_LEVEL1_HANDLER
+        {
+            return;
+        }
+        // The core takes it at the next instruction boundary the SR mask allows, as the hardware does.
+        self.m68k.cpu.core.set_irq(1);
     }
 
     /// Deferred tasks execute once after an interrupt has been reenabled.
@@ -13135,6 +13193,9 @@ fn load_app_generic<M: MemoryBus>(
     // Properly handling those requires a skip-the-instruction stub
     // which is a separate undertaking.
     bus.write_word(0x00FE, 0x4E73); // RTE
+    // Startside's patch: the level-1 autovector returns at once (it pointed at an empty Quadra RAM handler),
+    // so an application that chains to the handler it found, as SimCity's does, lands on an RTE.
+    bus.write_long(LEVEL1_AUTOVECTOR, DEFAULT_LEVEL1_HANDLER);
     bus.write_long(0x0014, 0x0000_00FE); // ZeroDivide vector
     bus.write_long(0x0018, 0x0000_00FE); // CHK vector
     bus.write_long(0x001C, 0x0000_00FE); // TRAPV vector

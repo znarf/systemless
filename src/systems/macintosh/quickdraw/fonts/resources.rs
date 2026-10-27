@@ -210,7 +210,7 @@ pub(crate) fn register_resource_font_strike_for_family(
         }));
     }
     let mut macroman = Vec::new();
-    for code in 0x80usize..=0xFF {
+    for code in 0x7Fusize..=0xFF {
         if code < first_char || code > last_char {
             continue;
         }
@@ -236,6 +236,9 @@ pub(crate) fn register_resource_font_strike_for_family(
         glyphs: ascii,
         data: coverage,
     }));
+    if std::env::var_os("ZZ_CHARWIDTH").is_some() {
+        eprintln!("[FONT-REG] family {family_id} size {size}");
+    }
     RESOURCE_FACES
         .lock()
         .expect("resource font cache poisoned")

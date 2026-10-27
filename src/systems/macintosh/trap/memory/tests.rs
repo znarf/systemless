@@ -10154,3 +10154,15 @@ fn status_gamma_rejects_invalid_driver_and_output_without_overwriting_output() {
         assert_eq!(bus.read_word(pb + 16), (-50i16) as u16);
     }
 }
+
+// Startside's patch: the heap walk's first block header, a free block from heapData to bkLim (IM II-24).
+#[test]
+fn heap_walk_block_spans_heap_data_to_bk_lim() {
+    let (_disp, _cpu, mut bus) = setup();
+    let zone = 0x0020_0000u32;
+    bus.write_long(zone, zone + 0x10_0034);
+    super::publish_heap_walk_block(&mut bus, zone);
+    let header = bus.read_long(zone + 52);
+    assert_eq!(header >> 30, 0, "a free block");
+    assert_eq!(zone + 52 + (header & 0x00FF_FFFF), zone + 0x10_0034);
+}

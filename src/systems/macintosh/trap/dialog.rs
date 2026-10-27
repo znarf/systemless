@@ -4726,20 +4726,19 @@ impl super::TrapDispatcher {
         let edit_field =
             bus.read_word(dialog_ptr + crate::dialog_manager::DIALOG_EDIT_FIELD_OFFSET) as i16;
         let stored_edit_item = if edit_field >= 0 { edit_field + 1 } else { 0 };
+        // Startside's patch: a disabled editText item still takes typing (disabling only keeps ModalDialog and
+        // DialogSelect from returning it, IM I-405): MacPaint 2.0's personalize dialog has only disabled ones, and its
+        // Name and Company fields took nothing.
         let stored_is_valid = stored_edit_item > 0
             && items
                 .get((stored_edit_item - 1) as usize)
-                .is_some_and(|item| {
-                    item.is_edit_text() && item.is_enabled()
-                });
+                .is_some_and(|item| item.is_edit_text());
         let edit_item = if stored_is_valid {
             stored_edit_item
         } else {
             items
                 .iter()
-                .position(|item| {
-                    item.is_edit_text() && item.is_enabled()
-                })
+                .position(|item| item.is_edit_text())
                 .map(|idx| (idx + 1) as i16)
                 .unwrap_or(0)
         };
@@ -4816,8 +4815,8 @@ impl super::TrapDispatcher {
             return false;
         };
         let base_type = dialog_item_base_type(item.item_type);
-        let is_disabled = is_dialog_item_disabled(item.item_type);
-        if base_type != DIALOG_ITEM_EDIT_TEXT || is_disabled {
+        // Startside's patch: a disabled editText item takes typing too (IM I-405).
+        if base_type != DIALOG_ITEM_EDIT_TEXT {
             return false;
         }
 
@@ -4874,9 +4873,8 @@ impl super::TrapDispatcher {
         let Some(item) = items.get((edit_item - 1) as usize) else {
             return false;
         };
-        if dialog_item_base_type(item.item_type) != DIALOG_ITEM_EDIT_TEXT
-            || is_dialog_item_disabled(item.item_type)
-        {
+        // Startside's patch: a disabled editText item can be the active one too (IM I-405).
+        if dialog_item_base_type(item.item_type) != DIALOG_ITEM_EDIT_TEXT {
             return false;
         }
 
@@ -6612,7 +6610,10 @@ impl super::TrapDispatcher {
                 }
                 // Icon (32)
                 DIALOG_ITEM_ICON => {
-                    if !skip_pictures && item.resource_id != 0 {
+                    // Startside's patch: an icon is redrawn with the rest even when pictures are skipped (it costs
+                    // 128 bytes, and the static text drawn just before erased its rect): MacPaint's About box kept
+                    // a sliver of Bill Atkinson's portrait where a statText rect overlaps it.
+                    if item.resource_id != 0 {
                         let drew_cicn = if let Some((_, icon_ptr)) =
                             self.find_or_load_resource_any(bus, *b"cicn", item.resource_id)
                         {
@@ -6895,7 +6896,19 @@ impl super::TrapDispatcher {
         // redrawing live standard controls so retained composition cannot
         // drop the aDefItem outline.
         let auto_default_outline = true;
-        for (i, item) in items.iter().enumerate() {
+        // Startside's patch: text items (whose redraw erases their rect) first, controls last, as DrawDialog
+        // draws a dialog (controls after the other items); icons redrawn with the texts. MacPaint's About box has
+        // statText rects running under its icon and OK button: redrawn in item order, they erased the button's left
+        // half and all but a sliver of Bill Atkinson's portrait.
+        let is_control = |item: &DialogItem| {
+            matches!(dialog_item_base_type(item.item_type), DIALOG_ITEM_BUTTON..=DIALOG_ITEM_RESOURCE_CONTROL)
+        };
+        let order: Vec<usize> = (0..items.len())
+            .filter(|&i| !is_control(&items[i]))
+            .chain((0..items.len()).filter(|&i| is_control(&items[i])))
+            .collect();
+        for i in order {
+            let item = &items[i];
             let item_num = (i + 1) as i16;
             if only_item.is_some_and(|only| item_num != only) {
                 continue;
@@ -7147,6 +7160,15 @@ impl super::TrapDispatcher {
                         false,
                         enabled,
                     );
+                }
+                // Startside's patch: a plain ICON item drawn again over what the texts erased (see above).
+                DIALOG_ITEM_ICON if item.resource_id != 0 => {
+                    // Loaded already: the first drawing of the dialog read it.
+                    if let Some((_, icon_ptr)) =
+                        self.find_loaded_resource_any(*b"ICON", item.resource_id)
+                    {
+                        self.draw_icon(bus, abs_top, abs_left, abs_bottom, abs_right, icon_ptr);
+                    }
                 }
                 _ => {}
             }
@@ -11221,7 +11243,10 @@ impl super::TrapDispatcher {
                 // return canonical TRUE as 1. Writing a word-sized -1 here
                 // both gives exact-value callers 0xFF and overwrites the
                 // adjacent stack byte.
-                bus.write_byte(sp + 4, if result { 1 } else { 0 });
+                // Startside's patch: the whole two-byte result slot, TRUE as $0100 (its low byte 0): MacWrite 1.1
+                // tests it with TST.W after a SUBQ that leaves its low byte as it was, and took every event for
+                // its Find dialog (never opened): no typing, no ruler.
+                bus.write_word(sp + 4, if result { 0x0100 } else { 0 });
                 cpu.write_reg(Register::A7, sp + 4);
                 Ok(())
             }
@@ -11512,7 +11537,8 @@ impl super::TrapDispatcher {
 
                 // DialogSelect shares IsDialogEvent's one-byte Pascal
                 // Boolean ABI: canonical TRUE is 1, not a word-sized -1.
-                bus.write_byte(sp + 12, if result { 1 } else { 0 });
+                // Startside's patch: the whole slot, as IsDialogEvent's.
+                bus.write_word(sp + 12, if result { 0x0100 } else { 0 });
                 cpu.write_reg(Register::A7, sp + 12);
                 Ok(())
             }
@@ -12557,6 +12583,40 @@ impl super::TrapDispatcher {
                                     let item = &items_clone[(hit - 1) as usize];
                                     let base_type = dialog_item_base_type(item.item_type);
                                     let is_disabled = is_dialog_item_disabled(item.item_type);
+
+                                    // Startside's patch: a click in a disabled editText item moves the insertion
+                                    // point there and ModalDialog goes on (IM I-405: disabling only keeps the item
+                                    // from being returned); MacPaint 2.0's Name and Company are both disabled.
+                                    if is_disabled && base_type == DIALOG_ITEM_EDIT_TEXT {
+                                        // The insertion point at the end of its text, which typing then extends.
+                                        let (dlg_ptr, edit_item, edit_text, items) = {
+                                            let tracking = self.dialog_tracking.as_mut().unwrap();
+                                            Self::sync_tracking_active_edit_item(tracking);
+                                            tracking.edit_item = hit;
+                                            if let Some(item) = tracking.items.get_mut((hit - 1) as usize) {
+                                                let end = item.text.len().min(i16::MAX as usize) as i16;
+                                                item.sel_start = end;
+                                                item.sel_end = end;
+                                            }
+                                            tracking.edit_text = tracking
+                                                .items
+                                                .get((hit - 1) as usize)
+                                                .map(|item| item.text.clone())
+                                                .unwrap_or_default();
+                                            // Typing extends the text rather than replacing it (not a Tab's selection).
+                                            tracking.edit_text_modified = true;
+                                            (
+                                                tracking.dialog_ptr,
+                                                tracking.edit_item,
+                                                tracking.edit_text.clone(),
+                                                tracking.items.clone(),
+                                            )
+                                        };
+                                        self.activate_dialog_edit_item(bus, cpu, dlg_ptr, &items, edit_item);
+                                        self.flush_dialog_edit_item_texts(
+                                            bus, dlg_ptr, &items, edit_item, &edit_text,
+                                        );
+                                    }
 
                                     if !is_disabled {
                                         match base_type {
