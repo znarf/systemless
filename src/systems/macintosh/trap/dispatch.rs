@@ -1466,6 +1466,8 @@ pub struct TrapDispatcher {
     pub(crate) find_window_hit_stub: u32,
     /// Startside's patch: application-WDEF windows whose highlight changed, to redraw with wDraw at the trap's end.
     pub(crate) pending_wdef_redraws: Vec<u32>,
+    /// Startside's patch: the text state (font, face, size) of the dialog being drawn, over the current port's.
+    pub(crate) dialog_text_state: std::cell::Cell<Option<(i16, u8, i16)>>,
     /// Startside's patch: counts writes to the virtual disk (a file's data or resources, a file removed), so an
     /// embedder can look for changed files only when something was written.
     pub(crate) vfs_write_generation: u64,
@@ -3863,6 +3865,7 @@ impl TrapDispatcher {
             window_def_trampoline: 0,
             find_window_hit_stub: 0,
             pending_wdef_redraws: Vec::new(),
+            dialog_text_state: std::cell::Cell::new(None),
             vfs_write_generation: 0,
             control_def_trampoline: 0,
             control_def_trampoline_chain: Vec::new(),
