@@ -574,9 +574,17 @@ impl super::TrapDispatcher {
         // thePort^.txFont and its neighbours, without TextFont, TextFace or
         // TextSize: GrafPort fields are the state (IM I-152), the traps only
         // one way to change them.
-        if is_tool && matches!(trap_num, 0x083..=0x086 | 0x08B..=0x08D) {
+        // Startside's patch: the setters and every other trap too (TextFont, TextFace, TextMode, TextSize change one field; the others are
+        // the port's as it stands), or their write-back put a stale cached font into the port: MacPaint's palette port
+        // took the document's outlined, shadowed text style when MacPaint called TextMode in it after closing its
+        // document, and its tools came out as letters (the user's screenshot).
+        // Every QuickDraw trap writes the cached state back into the port (sync_current_port_draw_state), so the
+        // cache takes the port's text fields first, whichever trap it is.
+        if is_tool {
             let port = *self.current_port;
-            if port != 0 {
+            let text_trap = matches!(trap_num, 0x083..=0x08D);
+            let old_port = self.port_allows_draw_state_memory_sync(bus, port) && (bus.read_word(port + 6) & 0xC000) != 0xC000;
+            if port != 0 && (text_trap || old_port) {
                 self.tx_font = bus.read_word(port + 68) as i16;
                 self.tx_face = decode_text_face_style(bus.read_word(port + 70));
                 self.tx_mode = bus.read_word(port + 72) as i16;
