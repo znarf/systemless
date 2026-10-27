@@ -6229,8 +6229,16 @@ impl SharedClassicHeapAllocator {
     }
 
     pub(crate) fn allocate(&self, size: u32, alignment: u32, heap_limit: u32) -> u32 {
-        let Some(plan) = self.allocation_plan(size, alignment, heap_limit) else {
-            return 0;
+        let plan = match self.allocation_plan(size, alignment, heap_limit) {
+            Some(plan) => plan,
+            // Startside's patch: the freed top of the heap back to the bump pointer, then once more.
+            None if Self::release_free_top(&mut self.0.borrow_mut()) => {
+                match self.allocation_plan(size, alignment, heap_limit) {
+                    Some(plan) => plan,
+                    None => return 0,
+                }
+            }
+            None => return 0,
         };
         if self.commit_allocation_plan(plan) {
             plan.address
@@ -6241,6 +6249,21 @@ impl SharedClassicHeapAllocator {
 
     pub(crate) fn heap_bump_ptr(&self) -> u32 {
         self.0.borrow().heap_ptr
+    }
+
+    /// Startside's patch: the bump pointer once the free blocks at its top are given back (`release_free_top`), and
+    /// the largest free block left (an allocation up to its size reuses it, best fit).
+    pub(crate) fn release_free_top_blocks(&self) -> (u32, u32) {
+        let mut state = self.0.borrow_mut();
+        Self::release_free_top(&mut state);
+        let largest = state
+            .free_blocks
+            .iter()
+            .filter(|(_, blocks)| !blocks.is_empty())
+            .map(|(&bucket, _)| bucket)
+            .max()
+            .unwrap_or(0);
+        (state.heap_ptr, largest)
     }
 
     pub(crate) fn set_allocation_size(&self, address: u32, size: u32) {
@@ -6268,6 +6291,32 @@ impl SharedClassicHeapAllocator {
                 .unwrap_or_else(|| Self::allocation_bucket_size(size));
             state.free_blocks.entry(bucket).or_default().push(address);
             crate::memory::bus::trace_alloc_event("free", address, size, bucket);
+        }
+    }
+
+    /// Startside's patch: when an allocation finds no room, free blocks ending at the bump pointer give their space
+    /// back to it, so a large block freed at the top of the heap can be allocated again at another size. MacPaint 1.x
+    /// saves and opens through one buffer of MaxMem less 1K, freed after each use: its space stayed in a bucket of that
+    /// exact size, and the next Open, a little smaller, found no room. Returns whether any space came back.
+    fn release_free_top(state: &mut ClassicHeapAllocatorState) -> bool {
+        let start = state.heap_ptr;
+        loop {
+            let heap_ptr = state.heap_ptr;
+            let top = state.free_blocks.iter().find_map(|(&bucket, blocks)| {
+                blocks
+                    .iter()
+                    .position(|&address| address.checked_add(bucket) == Some(heap_ptr))
+                    .map(|index| (bucket, index))
+            });
+            let Some((bucket, index)) = top else {
+                return state.heap_ptr != start;
+            };
+            let blocks = state.free_blocks.get_mut(&bucket).expect("bucket found above");
+            let address = blocks.swap_remove(index);
+            if blocks.is_empty() {
+                state.free_blocks.remove(&bucket);
+            }
+            state.heap_ptr = address;
         }
     }
 }

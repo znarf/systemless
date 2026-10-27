@@ -2882,6 +2882,12 @@ impl MacMemoryBus {
         self.heap_allocator.heap_bump_ptr()
     }
 
+    /// Startside's patch: MaxMem compacts the heap (IM II-38): the free blocks at the heap's top go back to the bump
+    /// pointer; returns it and the largest free block.
+    pub(crate) fn compact_classic_heap_top(&self) -> (u32, u32) {
+        self.heap_allocator.release_free_top_blocks()
+    }
+
     /// Upper bound used by the classic heap allocator. The framebuffer and
     /// Systemless-owned synthetic allocations occupy the range above this
     /// address; process Memory Manager operations use it as their allocation
@@ -5212,6 +5218,18 @@ mod tests {
             reused, aligned,
             "aligned allocation should prefer an aligned free block over a skewed one"
         );
+    }
+
+    #[test]
+    fn freed_top_blocks_return_to_the_bump_pointer() {
+        // Startside's patch: a large block freed at the heap's top can be had again at another size (MacPaint 1.x
+        // saves, then opens, through a buffer of MaxMem less 1K).
+        let mut bus = MacMemoryBus::new(4 * 1024 * 1024);
+        let first = bus.alloc(1_000_000);
+        assert_ne!(first, 0);
+        bus.free(first);
+        let larger = bus.alloc(1_500_000);
+        assert_eq!(larger, first, "the freed top space is allocated again, at another size");
     }
 
     #[test]

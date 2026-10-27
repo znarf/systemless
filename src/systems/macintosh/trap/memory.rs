@@ -1837,7 +1837,21 @@ impl super::TrapDispatcher {
             // it cannot represent the remaining launch-time growth allowance.
             // $A11D dispatches here via the OS-trap low-byte (0x1D) decode.
             (false, 0x1D) => {
-                let free = free_heap_estimate(bus);
+                let mut free = free_heap_estimate(bus);
+                // Startside's patch: whatever the machine's memory (FreeMem's compatibility floor of 24 MB included),
+                // MaxMem promises no more than NewHandle can give: the largest free block, or the space between the
+                // allocator's cursor and its ceiling or ApplLimit, whichever is lower (the ceiling lies above
+                // ApplLimit, over the stack), less 1K. MacPaint 1.x (ReadWrite) allocates MaxMem less 1K to read its
+                // scratch file as it saves and the document as it opens; told more, its NewHandle failed and it read
+                // through a NIL handle: pictures reopened blank.
+                let appl_limit = bus.read_long(addr::APPL_LIMIT);
+                let limit = match appl_limit {
+                    0 => bus.classic_heap_limit(),
+                    _ => bus.classic_heap_limit().min(appl_limit),
+                };
+                let (cursor, largest_free) = bus.compact_classic_heap_top();
+                let room = limit.saturating_sub(cursor).max(largest_free);
+                free = free.min(room.saturating_sub(1024) & !3);
                 cpu.write_reg(Register::D0, free);
                 let heap_end = bus.read_long(addr::HEAP_END);
                 let appl_limit = bus.read_long(addr::APPL_LIMIT);

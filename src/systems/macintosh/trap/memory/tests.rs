@@ -6036,11 +6036,10 @@ fn test_max_mem() {
     let result = dispatcher.dispatch_memory(false, 0x1D, &mut cpu, &mut bus);
     assert!(result.is_some(), "MaxMem should be handled");
     assert!(result.unwrap().is_ok(), "MaxMem should succeed");
-    assert_eq!(
-        cpu.read_reg(Register::D0),
-        24 * 1024 * 1024,
-        "MaxMem should return 24MB clamp floor in D0"
-    );
+    // Startside's patch: MaxMem promises no more than NewHandle can give (it was the 24 MB floor FreeMem reports).
+    let max = cpu.read_reg(Register::D0);
+    assert!(max > 0 && max < 24 * 1024 * 1024, "MaxMem is what the heap can give: {max}");
+    assert_ne!(bus.alloc(max), 0, "a block of MaxMem's size can be allocated");
     assert_eq!(
         cpu.read_reg(Register::A0),
         0,
