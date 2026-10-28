@@ -640,32 +640,115 @@ enum StandardFileGetAction {
     Navigate,
 }
 
+// Startside's patch: System 7.1's Standard File, measured on the user's Mini vMac screenshots of MacPaint 1.3 (at 2x,
+// `screenshots/macpaint/` in the notes): rects in the dialog's own coordinates, its top-left at the application's
+// `where`. Both dialogs are 344 wide; the list (scroll bar included) under a pop-up naming the folder, the volume's
+// icon and name at the top right, the buttons in a column on the right, the default one last.
 const STANDARD_FILE_SAVE_ITEM: i16 = 1;
 const STANDARD_FILE_NAME_ITEM: i16 = 9;
-const STANDARD_FILE_DIALOG_WIDTH: i16 = 360;
-const STANDARD_FILE_DIALOG_HEIGHT: i16 = 260;
-const STANDARD_FILE_PUT_VOLUME_RECT: (i16, i16, i16, i16) = (12, 24, 31, 116);
-const STANDARD_FILE_PUT_VOLUME_LABEL_RECT: (i16, i16, i16, i16) = (12, 124, 31, 336);
-const STANDARD_FILE_PUT_LIST_RECT: (i16, i16, i16, i16) = (38, 18, 156, 316);
-const STANDARD_FILE_PUT_SCROLL_RECT: (i16, i16, i16, i16) = (38, 315, 156, 331);
-const STANDARD_FILE_PROMPT_RECT: (i16, i16, i16, i16) = (166, 24, 184, 330);
-const STANDARD_FILE_NAME_RECT: (i16, i16, i16, i16) = (188, 24, 208, 330);
-const STANDARD_FILE_PUT_DESKTOP_RECT: (i16, i16, i16, i16) = (220, 24, 242, 104);
-const STANDARD_FILE_CANCEL_RECT: (i16, i16, i16, i16) = (220, 166, 242, 246);
-const STANDARD_FILE_SAVE_RECT: (i16, i16, i16, i16) = (220, 258, 242, 338);
-const STANDARD_FILE_GET_DIALOG_WIDTH: i16 = 356;
-const STANDARD_FILE_GET_DIALOG_HEIGHT: i16 = 178;
+const STANDARD_FILE_DIALOG_WIDTH: i16 = 344;
+const STANDARD_FILE_DIALOG_HEIGHT: i16 = 188;
+const STANDARD_FILE_PUT_VOLUME_RECT: (i16, i16, i16, i16) = (6, 12, 24, 230);
+const STANDARD_FILE_PUT_VOLUME_LABEL_RECT: (i16, i16, i16, i16) = (6, 247, 24, 336);
+const STANDARD_FILE_PUT_LIST_RECT: (i16, i16, i16, i16) = (29, 12, 127, 230);
+const STANDARD_FILE_PUT_SCROLL_RECT: (i16, i16, i16, i16) = (29, 214, 127, 230);
+const STANDARD_FILE_PROMPT_RECT: (i16, i16, i16, i16) = (136, 15, 152, 230);
+const STANDARD_FILE_NAME_RECT: (i16, i16, i16, i16) = (157, 15, 173, 227);
+const STANDARD_FILE_PUT_EJECT_RECT: (i16, i16, i16, i16) = (32, 252, 52, 332);
+const STANDARD_FILE_PUT_DESKTOP_RECT: (i16, i16, i16, i16) = (60, 252, 80, 332);
+const STANDARD_FILE_PUT_NEW_RECT: (i16, i16, i16, i16) = (88, 252, 108, 332);
+const STANDARD_FILE_PUT_SEPARATOR_RECT: (i16, i16, i16, i16) = (119, 252, 120, 332);
+const STANDARD_FILE_CANCEL_RECT: (i16, i16, i16, i16) = (130, 252, 150, 332);
+const STANDARD_FILE_SAVE_RECT: (i16, i16, i16, i16) = (161, 252, 181, 332);
+const STANDARD_FILE_GET_DIALOG_WIDTH: i16 = 344;
+const STANDARD_FILE_GET_DIALOG_HEIGHT: i16 = 166;
 const STANDARD_FILE_GET_OPEN_ITEM: i16 = 1;
-const STANDARD_FILE_GET_VOLUME_RECT: (i16, i16, i16, i16) = (12, 90, 31, 164);
-const STANDARD_FILE_GET_VOLUME_LABEL_RECT: (i16, i16, i16, i16) = (12, 268, 31, 336);
-const STANDARD_FILE_GET_LIST_RECT: (i16, i16, i16, i16) = (35, 18, 163, 236);
-const STANDARD_FILE_GET_SCROLL_RECT: (i16, i16, i16, i16) = (35, 235, 163, 251);
-const STANDARD_FILE_GET_ROW_HEIGHT: i16 = 14;
-const STANDARD_FILE_GET_EJECT_RECT: (i16, i16, i16, i16) = (38, 258, 59, 338);
-const STANDARD_FILE_GET_DESKTOP_RECT: (i16, i16, i16, i16) = (66, 258, 87, 338);
-const STANDARD_FILE_GET_SEPARATOR_RECT: (i16, i16, i16, i16) = (98, 258, 99, 338);
-const STANDARD_FILE_GET_CANCEL_RECT: (i16, i16, i16, i16) = (110, 258, 131, 338);
-const STANDARD_FILE_GET_OPEN_RECT: (i16, i16, i16, i16) = (138, 258, 159, 338);
+const STANDARD_FILE_GET_VOLUME_RECT: (i16, i16, i16, i16) = (6, 12, 24, 230);
+const STANDARD_FILE_GET_VOLUME_LABEL_RECT: (i16, i16, i16, i16) = (6, 247, 24, 336);
+const STANDARD_FILE_GET_LIST_RECT: (i16, i16, i16, i16) = (29, 12, 159, 230);
+const STANDARD_FILE_GET_SCROLL_RECT: (i16, i16, i16, i16) = (29, 214, 159, 230);
+const STANDARD_FILE_GET_ROW_HEIGHT: i16 = 16;
+const STANDARD_FILE_GET_EJECT_RECT: (i16, i16, i16, i16) = (32, 252, 52, 332);
+const STANDARD_FILE_GET_DESKTOP_RECT: (i16, i16, i16, i16) = (60, 252, 80, 332);
+const STANDARD_FILE_GET_SEPARATOR_RECT: (i16, i16, i16, i16) = (91, 252, 92, 332);
+const STANDARD_FILE_GET_CANCEL_RECT: (i16, i16, i16, i16) = (104, 252, 124, 332);
+const STANDARD_FILE_GET_OPEN_RECT: (i16, i16, i16, i16) = (135, 252, 155, 332);
+// Startside's patch: System 7.1's small icons in Standard File, copied from the screenshots ('#' black).
+const STANDARD_FILE_FOLDER_ICON: [&str; 9] = [
+    ".####......",
+    "#....#####.",
+    "#.........#",
+    "#.........#",
+    "#.........#",
+    "#.........#",
+    "#.........#",
+    "#.........#",
+    "###########",
+];
+const STANDARD_FILE_DOCUMENT_ICON: [&str; 10] = [
+    "######..",
+    "#....##.",
+    "#....###",
+    "#......#",
+    "#......#",
+    "#......#",
+    "#......#",
+    "#......#",
+    "#......#",
+    "########",
+];
+// The application's diamond (seen only dimmed in the Save list: an approximation).
+const STANDARD_FILE_APPLICATION_ICON: [&str; 11] = [
+    ".....#.....",
+    "....#.#....",
+    "...#...#...",
+    "..#.....#..",
+    ".#.....#.#.",
+    "#.....#...#",
+    ".#...#...#.",
+    "..#.....#..",
+    "...#...#...",
+    "....#.#....",
+    ".....#.....",
+];
+const STANDARD_FILE_DISK_ICON: [&str; 12] = [
+    ".##########..",
+    "#..#...#.#.#.",
+    "#..#...#.#..#",
+    "#..#.....#..#",
+    "#...#####...#",
+    "#...........#",
+    "#...........#",
+    "#...#####...#",
+    "#..#.....#..#",
+    "#..#.....#..#",
+    "#..#.....#..#",
+    ".############",
+];
+const STANDARD_FILE_POPUP_TRIANGLE: [&str; 6] = [
+    "###########",
+    ".#########.",
+    "..#######..",
+    "...#####...",
+    "....###....",
+    ".....#.....",
+];
+// The New button's folder, larger than the list's.
+const STANDARD_FILE_NEW_FOLDER_ICON: [&str; 13] = [
+    "..####..........",
+    ".#....#.........",
+    "###############.",
+    "#..............#",
+    "#..............#",
+    "#..............#",
+    "#..............#",
+    "#..............#",
+    "#..............#",
+    "#..............#",
+    "#..............#",
+    "#..............#",
+    "################",
+];
 
 #[inline]
 fn return_noerr_and_pop<C: CpuOps>(cpu: &mut C, bytes: u32) -> Result<()> {
@@ -2106,6 +2189,10 @@ impl super::TrapDispatcher {
             if file_types.is_some_and(|types| !types.contains(&metadata.file_type)) {
                 continue;
             }
+            // Startside's patch: invisible files (fInvisible, the Finder's Desktop file) aren't listed.
+            if metadata.finder_flags & 0x4000 != 0 {
+                continue;
+            }
             let vref = Self::boot_volume_ref_num();
             let wd_ref = self
                 .open_working_directory(vref, metadata.parent_dir_id, 0)
@@ -2123,6 +2210,8 @@ impl super::TrapDispatcher {
                 is_directory: false,
             });
         }
+        // Startside's patch: in name order, ignoring case, as System 7.1 lists them.
+        entries.sort_by_key(|entry| entry.display_name.to_lowercase());
         entries
     }
 
@@ -2167,6 +2256,8 @@ impl super::TrapDispatcher {
             .entries
             .get(tracking.selected)
             .is_some_and(|entry| entry.is_directory || entry.file_type != 0);
+        // Startside's patch: System 7.1's items; the pop-up, the volume's name, the list and the dotted line are drawn
+        // by `draw_standard_file_get_dialog` itself.
         vec![
             DialogItem {
                 item_type: if open_enabled { 4 } else { 0x84 },
@@ -2193,15 +2284,13 @@ impl super::TrapDispatcher {
                 ..DialogItem::default()
             },
             DialogItem {
-                item_type: 8,
+                item_type: 0,
                 rect: STANDARD_FILE_GET_VOLUME_LABEL_RECT,
-                text: super::dispatch::BOOT_VOLUME_NAME.to_string(),
                 ..DialogItem::default()
             },
             DialogItem {
                 item_type: 0,
                 rect: STANDARD_FILE_GET_VOLUME_RECT,
-                text: super::dispatch::BOOT_VOLUME_NAME.to_string(),
                 ..DialogItem::default()
             },
             DialogItem {
@@ -2242,39 +2331,17 @@ impl super::TrapDispatcher {
             false,
             0,
         );
-        let (top, left, _, _) = tracking.bounds;
-        let (button_top, button_left, button_bottom, button_right) = STANDARD_FILE_GET_OPEN_RECT;
         let selected_is_openable = tracking
             .entries
             .get(tracking.selected)
             .is_some_and(|entry| entry.is_directory || entry.file_type != 0);
-        self.draw_button_state(
-            bus,
-            top + button_top,
-            left + button_left,
-            top + button_bottom,
-            left + button_right,
-            "Open",
-            true,
-            selected_is_openable,
-        );
-        let (vtop, vleft, vbottom, vright) = STANDARD_FILE_GET_VOLUME_RECT;
-        self.draw_popup_control(
-            bus,
-            top + vtop,
-            left + vleft,
-            top + vbottom,
-            left + vright,
-            super::dispatch::BOOT_VOLUME_NAME,
-        );
-        let (stop, sleft, sbottom, sright) = STANDARD_FILE_GET_SEPARATOR_RECT;
-        self.draw_rect_border(
-            bus,
-            top + stop,
-            left + sleft,
-            top + sbottom + 1,
-            left + sright,
-        );
+        // Startside's patch: System 7.1's dialog (`STANDARD_FILE_*` above).
+        self.draw_standard_file_button(bus, tracking.bounds, STANDARD_FILE_GET_OPEN_RECT, "Open", true, selected_is_openable);
+        self.draw_standard_file_button(bus, tracking.bounds, STANDARD_FILE_GET_EJECT_RECT, "Eject", false, false);
+        let (volume, folder) = self.standard_file_location_names(tracking.current_dir_id);
+        self.draw_standard_file_popup(bus, tracking.bounds, STANDARD_FILE_GET_VOLUME_RECT, folder.as_deref().unwrap_or(&volume), folder.is_some());
+        self.draw_standard_file_volume_label(bus, tracking.bounds, STANDARD_FILE_GET_VOLUME_LABEL_RECT, &volume);
+        self.draw_standard_file_separator(bus, tracking.bounds, STANDARD_FILE_GET_SEPARATOR_RECT);
         self.draw_standard_file_get_list(bus, tracking);
         self.standard_file_drawn = bus.screen_mark();
     }
@@ -2284,161 +2351,285 @@ impl super::TrapDispatcher {
         bus: &mut MacMemoryBus,
         tracking: &StandardFileGetTrackingState,
     ) {
-        let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
-            self.get_screen_params();
-        let (dialog_top, dialog_left, _, _) = tracking.bounds;
-        let (list_top, list_left, list_bottom, list_right) = STANDARD_FILE_GET_LIST_RECT;
-        let top = dialog_top + list_top;
-        let left = dialog_left + list_left;
-        let bottom = dialog_top + list_bottom;
-        let right = dialog_left + list_right;
-
-        Self::fb_fill_rect(
+        self.draw_standard_file_list(
             bus,
-            screen_base,
-            row_bytes,
-            pixel_size,
-            screen_width,
-            screen_height,
-            top,
-            left,
-            bottom,
-            right,
+            tracking.bounds,
+            STANDARD_FILE_GET_LIST_RECT,
+            STANDARD_FILE_GET_SCROLL_RECT,
+            &tracking.entries,
+            Self::standard_file_get_first_visible_index(tracking),
+            Self::standard_file_get_visible_rows(),
+            (!tracking.entries.is_empty()).then_some(tracking.selected),
             false,
         );
-        Self::fb_fill_rect(
-            bus,
-            screen_base,
-            row_bytes,
-            pixel_size,
-            screen_width,
-            screen_height,
-            top,
-            left,
-            top + 1,
-            right,
-            true,
-        );
-        Self::fb_fill_rect(
-            bus,
-            screen_base,
-            row_bytes,
-            pixel_size,
-            screen_width,
-            screen_height,
-            bottom - 1,
-            left,
-            bottom,
-            right,
-            true,
-        );
-        Self::fb_fill_rect(
-            bus,
-            screen_base,
-            row_bytes,
-            pixel_size,
-            screen_width,
-            screen_height,
-            top,
-            left,
-            bottom,
-            left + 1,
-            true,
-        );
-        Self::fb_fill_rect(
-            bus,
-            screen_base,
-            row_bytes,
-            pixel_size,
-            screen_width,
-            screen_height,
-            top,
-            right - 1,
-            bottom,
-            right,
-            true,
-        );
+    }
 
-        let first_visible = Self::standard_file_get_first_visible_index(tracking);
-        let visible_rows = Self::standard_file_get_visible_rows();
+    /// Startside's patch: System 7.1's file list: a frame round the rows and the scroll bar, rows 16 pixels high,
+    /// each a small icon (folder, document, application) and the name in the system font, the selected one inverted
+    /// across the list's width; `dim_files` greys everything but folders (the Save dialog: files can't be picked).
+    /// The scroll bar is inactive (no thumb) when every row fits.
+    fn draw_standard_file_list(
+        &self,
+        bus: &mut MacMemoryBus,
+        bounds: (i16, i16, i16, i16),
+        list_rect: (i16, i16, i16, i16),
+        scroll_rect: (i16, i16, i16, i16),
+        entries: &[StandardFileGetEntry],
+        first_visible: usize,
+        visible_rows: usize,
+        selected: Option<usize>,
+        dim_files: bool,
+    ) {
+        let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
+            self.get_screen_params();
+        let (dialog_top, dialog_left, _, _) = bounds;
+        let top = dialog_top + list_rect.0;
+        let left = dialog_left + list_rect.1;
+        let bottom = dialog_top + list_rect.2;
+        let right = dialog_left + list_rect.3;
+        let rows_right = dialog_left + scroll_rect.1;
+        let fill = |bus: &mut MacMemoryBus, t: i16, l: i16, b: i16, r: i16, black: bool| {
+            Self::fb_fill_rect(bus, screen_base, row_bytes, pixel_size, screen_width, screen_height, t, l, b, r, black);
+        };
+        fill(bus, top, left, bottom, right, false);
+        fill(bus, top, left, top + 1, right, true);
+        fill(bus, bottom - 1, left, bottom, right, true);
+        fill(bus, top, left, bottom, left + 1, true);
+        fill(bus, top, right - 1, bottom, right, true);
+
         for row in 0..visible_rows {
             let index = first_visible + row;
-            let Some(entry) = tracking.entries.get(index) else {
+            let Some(entry) = entries.get(index) else {
                 break;
             };
-            let row_top = top + 2 + (row as i16 * STANDARD_FILE_GET_ROW_HEIGHT);
-            let row_bottom = (row_top + STANDARD_FILE_GET_ROW_HEIGHT).min(bottom - 1);
-            let selected = index == tracking.selected;
-            if selected {
-                Self::fb_fill_rect(
-                    bus,
-                    screen_base,
-                    row_bytes,
-                    pixel_size,
-                    screen_width,
-                    screen_height,
-                    row_top,
-                    left + 2,
-                    row_bottom,
-                    right - 2,
-                    true,
-                );
+            let row_top = top + 1 + row as i16 * STANDARD_FILE_GET_ROW_HEIGHT;
+            let is_selected = selected == Some(index);
+            if is_selected {
+                fill(bus, row_top, left + 1, row_top + STANDARD_FILE_GET_ROW_HEIGHT, rows_right, true);
             }
-            let text = if entry.is_directory {
-                format!(
-                    "{} ▸",
-                    Self::standard_file_get_display_name(&entry.display_name)
-                )
+            let ink = !is_selected;
+            if entry.is_directory {
+                self.draw_standard_file_icon(bus, left + 5, row_top + 3, &STANDARD_FILE_FOLDER_ICON, ink);
+            } else if entry.file_type == u32::from_be_bytes(*b"APPL") {
+                self.draw_standard_file_icon(bus, left + 5, row_top + 1, &STANDARD_FILE_APPLICATION_ICON, ink);
             } else {
-                Self::standard_file_get_display_name(&entry.display_name)
-            };
-            if selected {
-                Self::fb_draw_string_styled_ink(
-                    bus,
-                    screen_base,
-                    row_bytes,
-                    pixel_size,
-                    screen_width,
-                    screen_height,
-                    left + 6,
-                    row_top + 11,
-                    &text,
-                    0,
-                    12,
-                    0,
-                    false,
-                );
-            } else {
-                Self::fb_draw_string(
-                    bus,
-                    screen_base,
-                    row_bytes,
-                    pixel_size,
-                    screen_width,
-                    screen_height,
-                    left + 6,
-                    row_top + 11,
-                    &text,
-                    0,
-                    12,
-                );
+                self.draw_standard_file_icon(bus, left + 7, row_top + 2, &STANDARD_FILE_DOCUMENT_ICON, ink);
+            }
+            let text = Self::standard_file_get_display_name(&entry.display_name);
+            Self::fb_draw_string_styled_ink(
+                bus,
+                screen_base,
+                row_bytes,
+                pixel_size,
+                screen_width,
+                screen_height,
+                left + 23,
+                row_top + 11,
+                &text,
+                0,
+                12,
+                0,
+                ink,
+            );
+            if dim_files && !entry.is_directory {
+                self.dim_rect(bus, row_top, left + 1, row_top + STANDARD_FILE_GET_ROW_HEIGHT, rows_right);
             }
         }
-        let max = tracking
-            .entries
-            .len()
-            .saturating_sub(Self::standard_file_get_visible_rows());
+        let max = entries.len().saturating_sub(visible_rows);
         self.draw_scroll_bar(
             bus,
-            dialog_top + STANDARD_FILE_GET_SCROLL_RECT.0,
-            dialog_left + STANDARD_FILE_GET_SCROLL_RECT.1,
-            dialog_top + STANDARD_FILE_GET_SCROLL_RECT.2,
-            dialog_left + STANDARD_FILE_GET_SCROLL_RECT.3,
-            Self::standard_file_get_first_visible_index(tracking) as i16,
+            dialog_top + scroll_rect.0,
+            dialog_left + scroll_rect.1,
+            dialog_top + scroll_rect.2,
+            dialog_left + scroll_rect.3,
+            first_visible.min(max).min(i16::MAX as usize) as i16,
             0,
             max.min(i16::MAX as usize) as i16,
             if max == 0 { 255 } else { 0 },
         );
+    }
+
+    /// Startside's patch: one of Standard File's small icons, its '#' pixels in black (or white on a selected row).
+    fn draw_standard_file_icon(&self, bus: &mut MacMemoryBus, x: i16, y: i16, icon: &[&str], black: bool) {
+        let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
+            self.get_screen_params();
+        for (dy, line) in icon.iter().enumerate() {
+            for (dx, pixel) in line.bytes().enumerate() {
+                if pixel == b'#' {
+                    Self::fb_set_pixel(
+                        bus,
+                        screen_base,
+                        row_bytes,
+                        pixel_size,
+                        screen_width,
+                        screen_height,
+                        x + dx as i16,
+                        y + dy as i16,
+                        black,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Startside's patch: the volume and the folder (none at the volume's top) a Standard File dialog is showing.
+    fn standard_file_location_names(&self, dir_id: u32) -> (String, Option<String>) {
+        let path = self.directory_path_for_id(dir_id).unwrap_or_default();
+        let volume = self
+            .vfs_volume_for_path(path)
+            .map(|volume| volume.name.clone())
+            .unwrap_or_else(|| Self::boot_volume_name().to_string());
+        if dir_id == 2 || path.is_empty() || path.eq_ignore_ascii_case(&volume) {
+            (volume, None)
+        } else {
+            (volume, Some(Self::vfs_directory_name(path)))
+        }
+    }
+
+    /// Startside's patch: System 7.1's pop-up over the list: the folder's (or disk's) icon, its name and ▼ in a box
+    /// with a one-pixel shadow, as wide as the name needs, centred over the list (`row_rect`: its row, the list's
+    /// width).
+    fn draw_standard_file_popup(
+        &self,
+        bus: &mut MacMemoryBus,
+        bounds: (i16, i16, i16, i16),
+        row_rect: (i16, i16, i16, i16),
+        name: &str,
+        is_folder: bool,
+    ) {
+        let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
+            self.get_screen_params();
+        let name = Self::standard_file_fit_name(name, 150);
+        let text_width = Self::fb_measure_string(&name, 0, 12);
+        let width = text_width + 45;
+        let top = bounds.0 + row_rect.0;
+        let bottom = bounds.0 + row_rect.2;
+        let left = bounds.1 + (row_rect.1 + row_rect.3) / 2 - width / 2;
+        let right = left + width;
+        let fill = |bus: &mut MacMemoryBus, t: i16, l: i16, b: i16, r: i16, black: bool| {
+            Self::fb_fill_rect(bus, screen_base, row_bytes, pixel_size, screen_width, screen_height, t, l, b, r, black);
+        };
+        fill(bus, top, left, bottom + 1, right + 1, false);
+        fill(bus, top, left, top + 1, right, true);
+        fill(bus, bottom - 1, left, bottom, right, true);
+        fill(bus, top, left, bottom, left + 1, true);
+        fill(bus, top, right - 1, bottom, right, true);
+        // The shadow, right and bottom, from three pixels in.
+        fill(bus, top + 3, right, bottom + 1, right + 1, true);
+        fill(bus, bottom, left + 3, bottom + 1, right + 1, true);
+        if is_folder {
+            self.draw_standard_file_icon(bus, left + 5, top + 5, &STANDARD_FILE_FOLDER_ICON, true);
+        } else {
+            self.draw_standard_file_icon(bus, left + 5, top + 4, &STANDARD_FILE_DISK_ICON, true);
+        }
+        Self::fb_draw_string(
+            bus,
+            screen_base,
+            row_bytes,
+            pixel_size,
+            screen_width,
+            screen_height,
+            left + 24,
+            top + 13,
+            &name,
+            0,
+            12,
+        );
+        self.draw_standard_file_icon(bus, left + 28 + text_width, top + 6, &STANDARD_FILE_POPUP_TRIANGLE, true);
+    }
+
+    /// Startside's patch: the volume's icon and name at the dialog's top right.
+    fn draw_standard_file_volume_label(
+        &self,
+        bus: &mut MacMemoryBus,
+        bounds: (i16, i16, i16, i16),
+        rect: (i16, i16, i16, i16),
+        volume: &str,
+    ) {
+        let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
+            self.get_screen_params();
+        let (top, left) = (bounds.0 + rect.0, bounds.1 + rect.1);
+        Self::fb_fill_rect(
+            bus,
+            screen_base,
+            row_bytes,
+            pixel_size,
+            screen_width,
+            screen_height,
+            top,
+            left,
+            bounds.0 + rect.2,
+            bounds.1 + rect.3,
+            false,
+        );
+        self.draw_standard_file_icon(bus, left, top + 4, &STANDARD_FILE_DISK_ICON, true);
+        let name = Self::standard_file_fit_name(volume, rect.3 - rect.1 - 19);
+        Self::fb_draw_string(
+            bus,
+            screen_base,
+            row_bytes,
+            pixel_size,
+            screen_width,
+            screen_height,
+            left + 19,
+            top + 13,
+            &name,
+            0,
+            12,
+        );
+    }
+
+    /// Startside's patch: a name cut with "…" to fit `max_width` pixels of the system font.
+    fn standard_file_fit_name(name: &str, max_width: i16) -> String {
+        if Self::fb_measure_string(name, 0, 12) <= max_width {
+            return name.to_string();
+        }
+        let mut chars: Vec<char> = name.chars().collect();
+        while !chars.is_empty() {
+            chars.pop();
+            let candidate: String = chars.iter().collect::<String>() + "…";
+            if Self::fb_measure_string(&candidate, 0, 12) <= max_width {
+                return candidate;
+            }
+        }
+        "…".to_string()
+    }
+
+    /// Startside's patch: System 7.1's dotted line between the navigation buttons and Cancel.
+    fn draw_standard_file_separator(&self, bus: &mut MacMemoryBus, bounds: (i16, i16, i16, i16), rect: (i16, i16, i16, i16)) {
+        let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
+            self.get_screen_params();
+        let y = bounds.0 + rect.0;
+        for x in (bounds.1 + rect.1..bounds.1 + rect.3).step_by(2) {
+            Self::fb_set_pixel(bus, screen_base, row_bytes, pixel_size, screen_width, screen_height, x, y, true);
+        }
+    }
+
+    /// Startside's patch: a Standard File push button, dimmed when disabled as System 7.1 draws it on a 1-bit
+    /// screen: its title greyed and, for the default button, its ring too (the button's own frame stays black).
+    fn draw_standard_file_button(
+        &self,
+        bus: &mut MacMemoryBus,
+        bounds: (i16, i16, i16, i16),
+        rect: (i16, i16, i16, i16),
+        title: &str,
+        is_default: bool,
+        enabled: bool,
+    ) {
+        let (top, left, bottom, right) = Self::dialog_item_screen_rect(bounds, rect);
+        self.draw_button_state(bus, top, left, bottom, right, title, is_default, enabled);
+        if enabled {
+            return;
+        }
+        self.dim_rect(bus, top + 2, left + 2, bottom - 2, right - 2);
+        if is_default {
+            let outline = crate::dialog_manager::evaluate_dialog_default_button_outline((top, left, bottom, right));
+            let (outer_top, outer_left, outer_bottom, outer_right) = outline.outer_rect();
+            self.dim_rect(bus, outer_top, outer_left, top, outer_right);
+            self.dim_rect(bus, bottom, outer_left, outer_bottom, outer_right);
+            self.dim_rect(bus, top, outer_left, bottom, left);
+            self.dim_rect(bus, top, right, bottom, outer_right);
+        }
     }
 
     fn standard_file_get_display_name(name: &str) -> String {
@@ -2455,7 +2646,7 @@ impl super::TrapDispatcher {
 
     fn standard_file_get_visible_rows() -> usize {
         let inner_height =
-            (STANDARD_FILE_GET_LIST_RECT.2 - STANDARD_FILE_GET_LIST_RECT.0 - 3).max(0);
+            (STANDARD_FILE_GET_LIST_RECT.2 - STANDARD_FILE_GET_LIST_RECT.0 - 2).max(0);
         (inner_height / STANDARD_FILE_GET_ROW_HEIGHT).max(1) as usize
     }
 
@@ -2700,7 +2891,7 @@ impl super::TrapDispatcher {
         if Self::standard_file_point_in_rect(local_v, local_h, STANDARD_FILE_GET_LIST_RECT)
             && !tracking.entries.is_empty()
         {
-            let row = ((local_v - STANDARD_FILE_GET_LIST_RECT.0 - 2) / STANDARD_FILE_GET_ROW_HEIGHT)
+            let row = ((local_v - STANDARD_FILE_GET_LIST_RECT.0 - 1) / STANDARD_FILE_GET_ROW_HEIGHT)
                 .max(0) as usize;
             let index = Self::standard_file_get_first_visible_index(tracking) + row;
             if index < tracking.entries.len() {
@@ -2746,7 +2937,7 @@ impl super::TrapDispatcher {
         let (local_v, local_h) = (v - top, h - left);
         let (_, _, _, writable) = self.standard_file_put_directory_location(tracking.current_dir_id);
         [
-            (STANDARD_FILE_SAVE_RECT, "Save", true, writable),
+            (STANDARD_FILE_SAVE_RECT, "Save", true, writable && !tracking.name.is_empty()),
             (STANDARD_FILE_CANCEL_RECT, "Cancel", false, true),
             (STANDARD_FILE_PUT_DESKTOP_RECT, "Desktop", false, true),
         ]
@@ -2882,12 +3073,13 @@ impl super::TrapDispatcher {
 
     fn standard_file_put_dialog_items(
         tracking: &StandardFilePutTrackingState,
-        location_label: &str,
-        writable: bool,
+        save_enabled: bool,
     ) -> Vec<DialogItem> {
+        // Startside's patch: System 7.1's items (the name stays item 9); the pop-up, the volume's name, the list and
+        // the dotted line are drawn by `draw_standard_file_put_dialog` itself.
         vec![
             DialogItem {
-                item_type: if writable { 4 } else { 0x84 },
+                item_type: if save_enabled { 4 } else { 0x84 },
                 rect: STANDARD_FILE_SAVE_RECT,
                 text: "Save".to_string(),
                 ..DialogItem::default()
@@ -2905,15 +3097,13 @@ impl super::TrapDispatcher {
                 ..DialogItem::default()
             },
             DialogItem {
-                item_type: 8,
+                item_type: 0,
                 rect: STANDARD_FILE_PUT_VOLUME_LABEL_RECT,
-                text: location_label.to_string(),
                 ..DialogItem::default()
             },
             DialogItem {
                 item_type: 0,
                 rect: STANDARD_FILE_PUT_VOLUME_RECT,
-                text: location_label.to_string(),
                 ..DialogItem::default()
             },
             DialogItem {
@@ -2940,6 +3130,22 @@ impl super::TrapDispatcher {
                 sel_end: tracking.sel_end,
                 ..DialogItem::default()
             },
+            DialogItem {
+                item_type: 0x84,
+                rect: STANDARD_FILE_PUT_EJECT_RECT,
+                text: "Eject".to_string(),
+                ..DialogItem::default()
+            },
+            DialogItem {
+                item_type: 0x84,
+                rect: STANDARD_FILE_PUT_NEW_RECT,
+                ..DialogItem::default()
+            },
+            DialogItem {
+                item_type: 0,
+                rect: STANDARD_FILE_PUT_SEPARATOR_RECT,
+                ..DialogItem::default()
+            },
         ]
     }
 
@@ -2948,9 +3154,10 @@ impl super::TrapDispatcher {
         bus: &mut MacMemoryBus,
         tracking: &StandardFilePutTrackingState,
     ) {
-        let (_, _, location_label, writable) =
-            self.standard_file_put_directory_location(tracking.current_dir_id);
-        let items = Self::standard_file_put_dialog_items(tracking, &location_label, writable);
+        let (_, _, _, writable) = self.standard_file_put_directory_location(tracking.current_dir_id);
+        // Startside's patch: Save is dimmed, ring included, while the name is empty (System 7.1).
+        let save_enabled = writable && !tracking.name.is_empty();
+        let items = Self::standard_file_put_dialog_items(tracking, save_enabled);
         // Startside's patch: dBoxProc (1), the double-framed modal box System 6's Standard File is (it was the
         // plain box, 2).
         self.draw_dialog(
@@ -2965,29 +3172,42 @@ impl super::TrapDispatcher {
             false,
             0,
         );
-        let (top, left, _, _) = tracking.bounds;
-        let (button_top, button_left, button_bottom, button_right) = STANDARD_FILE_SAVE_RECT;
-        self.draw_button_state(
-            bus,
-            top + button_top,
-            left + button_left,
-            top + button_bottom,
-            left + button_right,
-            "Save",
-            true,
-            writable,
-        );
-        let (vtop, vleft, vbottom, vright) = STANDARD_FILE_PUT_VOLUME_RECT;
-        self.draw_popup_control(
-            bus,
-            top + vtop,
-            left + vleft,
-            top + vbottom,
-            left + vright,
-            &location_label,
-        );
+        // Startside's patch: System 7.1's dialog (`STANDARD_FILE_*` above).
+        self.draw_standard_file_button(bus, tracking.bounds, STANDARD_FILE_SAVE_RECT, "Save", true, save_enabled);
+        self.draw_standard_file_button(bus, tracking.bounds, STANDARD_FILE_PUT_EJECT_RECT, "Eject", false, false);
+        self.draw_standard_file_new_folder_button(bus, tracking.bounds);
+        let (volume, folder) = self.standard_file_location_names(tracking.current_dir_id);
+        self.draw_standard_file_popup(bus, tracking.bounds, STANDARD_FILE_PUT_VOLUME_RECT, folder.as_deref().unwrap_or(&volume), folder.is_some());
+        self.draw_standard_file_volume_label(bus, tracking.bounds, STANDARD_FILE_PUT_VOLUME_LABEL_RECT, &volume);
+        self.draw_standard_file_separator(bus, tracking.bounds, STANDARD_FILE_PUT_SEPARATOR_RECT);
         self.draw_standard_file_put_list(bus, tracking);
         self.standard_file_drawn = bus.screen_mark();
+    }
+
+    /// Startside's patch: System 7.1's "New" button with a folder, under Desktop. Creating a folder needs its own
+    /// naming dialog, not built: the button is drawn dimmed.
+    fn draw_standard_file_new_folder_button(&self, bus: &mut MacMemoryBus, bounds: (i16, i16, i16, i16)) {
+        let (top, left, bottom, right) = Self::dialog_item_screen_rect(bounds, STANDARD_FILE_PUT_NEW_RECT);
+        self.draw_button_state(bus, top, left, bottom, right, "", false, false);
+        let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
+            self.get_screen_params();
+        let metrics = crate::quickdraw::text::get_font_metrics(0, 12);
+        let text_y = top + (bottom - top - (metrics.ascent + metrics.descent)) / 2 + metrics.ascent;
+        Self::fb_draw_string(
+            bus,
+            screen_base,
+            row_bytes,
+            pixel_size,
+            screen_width,
+            screen_height,
+            left + 14,
+            text_y,
+            "New",
+            0,
+            12,
+        );
+        self.draw_standard_file_icon(bus, left + 52, top + 3, &STANDARD_FILE_NEW_FOLDER_ICON, true);
+        self.dim_rect(bus, top + 2, left + 2, bottom - 2, right - 2);
     }
 
     /// Whether the Standard File dialog drawn last still stands untouched:
@@ -3011,7 +3231,7 @@ impl super::TrapDispatcher {
 
     fn standard_file_put_visible_rows() -> usize {
         let inner_height =
-            (STANDARD_FILE_PUT_LIST_RECT.2 - STANDARD_FILE_PUT_LIST_RECT.0 - 3).max(0);
+            (STANDARD_FILE_PUT_LIST_RECT.2 - STANDARD_FILE_PUT_LIST_RECT.0 - 2).max(0);
         (inner_height / STANDARD_FILE_GET_ROW_HEIGHT).max(1) as usize
     }
 
@@ -3027,159 +3247,17 @@ impl super::TrapDispatcher {
         bus: &mut MacMemoryBus,
         tracking: &StandardFilePutTrackingState,
     ) {
-        let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
-            self.get_screen_params();
-        let (dialog_top, dialog_left, _, _) = tracking.bounds;
-        let (list_top, list_left, list_bottom, list_right) = STANDARD_FILE_PUT_LIST_RECT;
-        let top = dialog_top + list_top;
-        let left = dialog_left + list_left;
-        let bottom = dialog_top + list_bottom;
-        let right = dialog_left + list_right;
-
-        Self::fb_fill_rect(
+        // Startside's patch: every file listed, the ones that aren't folders dimmed (System 7.1).
+        self.draw_standard_file_list(
             bus,
-            screen_base,
-            row_bytes,
-            pixel_size,
-            screen_width,
-            screen_height,
-            top,
-            left,
-            bottom,
-            right,
-            false,
-        );
-        Self::fb_fill_rect(
-            bus,
-            screen_base,
-            row_bytes,
-            pixel_size,
-            screen_width,
-            screen_height,
-            top,
-            left,
-            top + 1,
-            right,
+            tracking.bounds,
+            STANDARD_FILE_PUT_LIST_RECT,
+            STANDARD_FILE_PUT_SCROLL_RECT,
+            &tracking.entries,
+            Self::standard_file_put_first_visible_index(tracking),
+            Self::standard_file_put_visible_rows(),
+            tracking.selected,
             true,
-        );
-        Self::fb_fill_rect(
-            bus,
-            screen_base,
-            row_bytes,
-            pixel_size,
-            screen_width,
-            screen_height,
-            bottom - 1,
-            left,
-            bottom,
-            right,
-            true,
-        );
-        Self::fb_fill_rect(
-            bus,
-            screen_base,
-            row_bytes,
-            pixel_size,
-            screen_width,
-            screen_height,
-            top,
-            left,
-            bottom,
-            left + 1,
-            true,
-        );
-        Self::fb_fill_rect(
-            bus,
-            screen_base,
-            row_bytes,
-            pixel_size,
-            screen_width,
-            screen_height,
-            top,
-            right - 1,
-            bottom,
-            right,
-            true,
-        );
-
-        let first_visible = Self::standard_file_put_first_visible_index(tracking);
-        for row in 0..Self::standard_file_put_visible_rows() {
-            let index = first_visible + row;
-            let Some(entry) = tracking.entries.get(index) else {
-                break;
-            };
-            let row_top = top + 2 + (row as i16 * STANDARD_FILE_GET_ROW_HEIGHT);
-            let row_bottom = (row_top + STANDARD_FILE_GET_ROW_HEIGHT).min(bottom - 1);
-            let selected = tracking.selected == Some(index);
-            if selected {
-                Self::fb_fill_rect(
-                    bus,
-                    screen_base,
-                    row_bytes,
-                    pixel_size,
-                    screen_width,
-                    screen_height,
-                    row_top,
-                    left + 2,
-                    row_bottom,
-                    right - 2,
-                    true,
-                );
-            }
-            let text = if entry.is_directory {
-                format!(
-                    "{} ▸",
-                    Self::standard_file_get_display_name(&entry.display_name)
-                )
-            } else {
-                Self::standard_file_get_display_name(&entry.display_name)
-            };
-            if selected {
-                Self::fb_draw_string_styled_ink(
-                    bus,
-                    screen_base,
-                    row_bytes,
-                    pixel_size,
-                    screen_width,
-                    screen_height,
-                    left + 6,
-                    row_top + 11,
-                    &text,
-                    0,
-                    12,
-                    0,
-                    false,
-                );
-            } else {
-                Self::fb_draw_string(
-                    bus,
-                    screen_base,
-                    row_bytes,
-                    pixel_size,
-                    screen_width,
-                    screen_height,
-                    left + 6,
-                    row_top + 11,
-                    &text,
-                    0,
-                    12,
-                );
-            }
-        }
-        let max = tracking
-            .entries
-            .len()
-            .saturating_sub(Self::standard_file_put_visible_rows());
-        self.draw_scroll_bar(
-            bus,
-            dialog_top + STANDARD_FILE_PUT_SCROLL_RECT.0,
-            dialog_left + STANDARD_FILE_PUT_SCROLL_RECT.1,
-            dialog_top + STANDARD_FILE_PUT_SCROLL_RECT.2,
-            dialog_left + STANDARD_FILE_PUT_SCROLL_RECT.3,
-            first_visible.min(i16::MAX as usize) as i16,
-            0,
-            max.min(i16::MAX as usize) as i16,
-            if max == 0 { 255 } else { 0 },
         );
     }
 
@@ -3242,7 +3320,10 @@ impl super::TrapDispatcher {
         default_name_ptr: u32,
         requested_origin: Option<(i16, i16)>,
     ) {
-        let default_name = standard_file_default_name(bus, default_name_ptr);
+        // Startside's patch: the field shows the name the application gave, empty included (MacPaint's new picture:
+        // Save then stays dimmed until a name is typed); "Untitled" is only the headless path's.
+        let mut default_name = if default_name_ptr != 0 { bus.read_pstring(default_name_ptr) } else { Vec::new() };
+        default_name.truncate(63);
         let mut name = decode_mac_roman(&default_name);
         Self::standard_file_clamp_name(&mut name);
         let bounds = self.standard_file_put_dialog_bounds(requested_origin);
@@ -3483,10 +3564,11 @@ impl super::TrapDispatcher {
         } else if Self::standard_file_point_in_rect(local_v, local_h, STANDARD_FILE_PUT_LIST_RECT)
             && !tracking.entries.is_empty()
         {
-            let row = ((local_v - STANDARD_FILE_PUT_LIST_RECT.0 - 2) / STANDARD_FILE_GET_ROW_HEIGHT)
+            let row = ((local_v - STANDARD_FILE_PUT_LIST_RECT.0 - 1) / STANDARD_FILE_GET_ROW_HEIGHT)
                 .max(0) as usize;
             let index = Self::standard_file_put_first_visible_index(tracking) + row;
-            if index >= tracking.entries.len() {
+            // Startside's patch: only folders can be picked (files are dimmed, System 7.1).
+            if index >= tracking.entries.len() || !tracking.entries[index].is_directory {
                 return None;
             }
             if tracking.selected == Some(index) && tracking.entries[index].is_directory {

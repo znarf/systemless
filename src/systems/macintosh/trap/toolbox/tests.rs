@@ -12466,7 +12466,8 @@ fn standard_get_file_gui_tracking_opens_selected_pilots_file() {
         "EV Override 1.0.1/Pilots/Rick Hardslab",
         *b"PIL ",
         *b"EVO!",
-        0x4000,
+        // Startside's patch: hasBeenInited; 0x4000 is fInvisible, and Standard File lists no invisible file.
+        0x0100,
     );
     bus.write_long(type_list_ptr, u32::from_be_bytes(*b"PIL "));
     bus.write_word(sp, 0x0006); // StandardGetFile selector
@@ -12524,7 +12525,7 @@ fn standard_get_file_gui_tracking_opens_selected_pilots_file() {
     );
     assert_eq!(bus.read_long(reply_ptr + 8), pilots_dir);
     assert_eq!(bus.read_pstring(reply_ptr + 12), b"Rick Hardslab".to_vec());
-    assert_eq!(bus.read_word(reply_ptr + 78), 0x4000);
+    assert_eq!(bus.read_word(reply_ptr + 78), 0x0100);
     assert_eq!(cpu.read_reg(Register::A7), sp + 16);
     assert_eq!(cpu.read_reg(Register::D0), 0);
 }
@@ -12744,7 +12745,7 @@ fn sf_get_file_gui_tracking_opens_selected_pilots_file_with_wdrefnum() {
     assert!(disp.is_standard_file_get_tracking());
     assert_eq!(
         disp.standard_file_get_tracking.as_ref().unwrap().bounds,
-        (84, 222, 262, 578)
+        (84, 222, 250, 566)
     );
 
     disp.event_queue.push_back(QueuedEvent {
@@ -12807,8 +12808,8 @@ fn sf_get_file_gui_cancel_acts_only_when_released_inside() {
     bus.write_word(sp + 26, 222); // where.h
 
     assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
-    assert_eq!(disp.standard_file_get_tracking.as_ref().unwrap().bounds, (84, 222, 262, 578));
-    // Cancel, (110, 258, 131, 338) in the dialog, is (194, 480, 215, 560) on the screen.
+    assert_eq!(disp.standard_file_get_tracking.as_ref().unwrap().bounds, (84, 222, 250, 566));
+    // Cancel, (104, 252, 124, 332) in the dialog, is (188, 474, 208, 554) on the screen.
     let inside = (200i16, 500i16);
     let outside = (300i16, 300i16);
     let event = |what: u16, (v, h): (i16, i16)| QueuedEvent {
@@ -12855,6 +12856,108 @@ fn sf_get_file_gui_cancel_acts_only_when_released_inside() {
     assert!(!disp.is_standard_file_get_tracking(), "released inside, Cancel cancels");
     assert_eq!(bus.read_byte(reply_ptr), 0);
     assert_eq!(cpu.read_reg(Register::A7), sp + 28);
+}
+
+// Startside's patch: SFGetFile's dialog is System 7.1's (344 x 166) with its top-left at `where`, the Point pushed
+// first (SP+24): MacPaint 1.3's (70, 112), as the user's System 7.1 screenshot shows it.
+#[test]
+fn sf_get_file_gui_dialog_opens_at_its_where_point() {
+    let _env = clear_standard_file_env();
+    let (mut disp, mut cpu, mut bus) = setup();
+    let screen_base = bus.alloc(64 * 342);
+    disp.set_screen_mode_for_test(screen_base, 64, 512, 342, 1);
+    let sp = TEST_SP;
+    let reply_ptr = 0x320D00u32;
+    let type_list_ptr = 0x320E00u32;
+    let prompt_ptr = 0x320F00u32;
+    disp.yield_for_ui = true;
+    bus.write_byte(prompt_ptr, 0);
+    bus.write_long(type_list_ptr, u32::from_be_bytes(*b"PNTG"));
+    bus.write_word(sp, 0x0002); // SFGetFile selector
+    bus.write_long(sp + 2, reply_ptr); // VAR reply
+    bus.write_long(sp + 6, 0); // dlgHook
+    bus.write_long(sp + 10, type_list_ptr); // typeList
+    bus.write_word(sp + 14, 1); // numTypes
+    bus.write_long(sp + 16, 0); // fileFilter
+    bus.write_long(sp + 20, prompt_ptr); // prompt: its low word is what was read as where.v
+    bus.write_word(sp + 24, 70); // where.v
+    bus.write_word(sp + 26, 112); // where.h
+
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert_eq!(disp.standard_file_get_tracking.as_ref().unwrap().bounds, (70, 112, 236, 456));
+}
+
+// Startside's patch: SFPutFile's dialog at its `where` (SP+18), Save pressable only once a name is typed (it is
+// dimmed while the name is empty), and only folders can be picked in its list (files are dimmed).
+#[test]
+fn sf_put_file_gui_save_needs_a_name_and_files_cannot_be_picked() {
+    let _env = clear_standard_file_env();
+    let (mut disp, mut cpu, mut bus) = setup();
+    let screen_base = bus.alloc(64 * 342);
+    disp.set_screen_mode_for_test(screen_base, 64, 512, 342, 1);
+    let sp = TEST_SP;
+    let reply_ptr = 0x320D00u32;
+    let name_ptr = 0x320E00u32;
+    let prompt_ptr = 0x320F00u32;
+    disp.yield_for_ui = true;
+    bus.write_byte(name_ptr, 0); // MacPaint's new picture has no name yet
+    bus.write_byte(prompt_ptr, 0);
+    bus.write_word(sp, 0x0001); // SFPutFile selector
+    bus.write_long(sp + 2, reply_ptr); // VAR reply
+    bus.write_long(sp + 6, 0); // dlgHook
+    bus.write_long(sp + 10, name_ptr); // origName
+    bus.write_long(sp + 14, prompt_ptr); // prompt
+    bus.write_word(sp + 18, 100); // where.v
+    bus.write_word(sp + 20, 124); // where.h
+
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    let mut tracking = disp.standard_file_put_tracking.clone().unwrap();
+    assert_eq!(tracking.bounds, (100, 124, 288, 468));
+    assert_eq!(tracking.name, "", "the field shows the empty name, not \"Untitled\"");
+    // The middle of Save, (161, 252, 181, 332) in the dialog.
+    let save = (100 + 171, 124 + 292);
+    assert!(disp.standard_file_put_button_at(&tracking, save.0, save.1).is_none(), "Save is dimmed");
+    tracking.name = "Try".to_string();
+    assert!(disp.standard_file_put_button_at(&tracking, save.0, save.1).is_some(), "Save works with a name");
+
+    let entry = |name: &str, is_directory: bool| super::super::dispatch::StandardFileGetEntry {
+        name: name.as_bytes().to_vec(),
+        display_name: name.to_string(),
+        vref: -1,
+        wd_ref: -1,
+        dir_id: 2,
+        file_type: if is_directory { 0 } else { u32::from_be_bytes(*b"TEXT") },
+        finder_flags: 0,
+        is_directory,
+    };
+    tracking.entries = vec![entry("Build", false), entry("obj", true)];
+    // The list's rows start one pixel under its top, (29, 12) in the dialog, 16 pixels each.
+    let row = |n: i16| (100 + 29 + 1 + n * 16 + 8, 124 + 50);
+    let (v, h) = row(0);
+    assert!(disp.standard_file_put_mouse_action(&mut tracking, v, h).is_none());
+    assert_eq!(tracking.selected, None, "a dimmed file can't be picked");
+    let (v, h) = row(1);
+    assert!(disp.standard_file_put_mouse_action(&mut tracking, v, h).is_none());
+    assert_eq!(tracking.selected, Some(1), "a folder can");
+}
+
+// Startside's patch: Standard File's lists leave out invisible files (the Finder's Desktop file) and are in name
+// order, ignoring case.
+#[test]
+fn standard_file_lists_skip_invisible_files_in_name_order() {
+    let (mut disp, _cpu, _bus) = setup();
+    let dir = disp.ensure_vfs_directory("Paint");
+    for (name, flags) in [("zeta", 0u16), ("Desktop", 0x4000), ("Alpha", 0), ("beta", 0)] {
+        let path = format!("Paint/{name}");
+        disp.vfs.insert(path.clone(), vec![1]);
+        disp.set_vfs_entry_metadata(&path, *b"TEXT", *b"ttxt", flags);
+    }
+    let names: Vec<String> = disp
+        .standard_file_get_candidates_in_directory(dir, None)
+        .into_iter()
+        .map(|entry| entry.display_name)
+        .collect();
+    assert_eq!(names, ["Alpha", "beta", "zeta"]);
 }
 
 // Pack3 / Standard File ($A9EA) — StandardPutFile selector $0005
@@ -13207,7 +13310,7 @@ fn sf_put_file_gui_locked_volume_requires_navigation_and_persists_cancelled_dire
         disp.standard_file_put_directory_location(tracking.current_dir_id);
     assert_eq!(label, "Pathways Disk");
     assert!(!writable);
-    let items = TrapDispatcher::standard_file_put_dialog_items(tracking, &label, writable);
+    let items = TrapDispatcher::standard_file_put_dialog_items(tracking, writable && !tracking.name.is_empty());
     assert_eq!(items[STANDARD_FILE_NAME_ITEM as usize - 1].item_type, 16);
     assert_eq!(
         items[STANDARD_FILE_NAME_ITEM as usize - 1].text,
