@@ -2707,10 +2707,25 @@ impl super::TrapDispatcher {
         }
     }
 
-    fn standard_file_put_dialog_bounds(&self) -> (i16, i16, i16, i16) {
+    /// The Save dialog at the application's `where`, kept on the screen;
+    /// centred when the call has none.
+    fn standard_file_put_dialog_bounds(
+        &self,
+        requested_origin: Option<(i16, i16)>,
+    ) -> (i16, i16, i16, i16) {
         let (_, _, screen_width, screen_height, _) = self.screen_mode;
-        let left = ((screen_width as i16 - STANDARD_FILE_DIALOG_WIDTH) / 2).max(8);
-        let top = ((screen_height as i16 - STANDARD_FILE_DIALOG_HEIGHT) / 2).max(24);
+        let (top, left) = match requested_origin {
+            Some((top, left)) => (
+                top.max(0)
+                    .min((screen_height as i16 - STANDARD_FILE_DIALOG_HEIGHT).max(0)),
+                left.max(0)
+                    .min((screen_width as i16 - STANDARD_FILE_DIALOG_WIDTH).max(0)),
+            ),
+            None => (
+                ((screen_height as i16 - STANDARD_FILE_DIALOG_HEIGHT) / 2).max(24),
+                ((screen_width as i16 - STANDARD_FILE_DIALOG_WIDTH) / 2).max(8),
+            ),
+        };
         (
             top,
             left,
@@ -3077,11 +3092,12 @@ impl super::TrapDispatcher {
         pop_total: u32,
         prompt_ptr: u32,
         default_name_ptr: u32,
+        requested_origin: Option<(i16, i16)>,
     ) {
         let default_name = standard_file_default_name(bus, default_name_ptr);
         let mut name = decode_mac_roman(&default_name);
         Self::standard_file_clamp_name(&mut name);
-        let bounds = self.standard_file_put_dialog_bounds();
+        let bounds = self.standard_file_put_dialog_bounds(requested_origin);
         let saved_pixels = self.save_dialog_pixels(bus, bounds);
         let name_len = name.len().min(i16::MAX as usize) as i16;
         let current_dir_id = *self.default_dir_id;
@@ -13121,6 +13137,16 @@ impl super::TrapDispatcher {
                         .map(|offset| bus.read_long(sp + offset))
                         .unwrap_or(0);
                     if self.yield_for_ui {
+                        // SFPutFile's and SFPPutFile's `where` is pushed
+                        // first, just above the prompt.
+                        let requested_origin = prompt_offset
+                            .filter(|_| matches!(selector, 0x0001 | 0x0003))
+                            .map(|offset| {
+                                (
+                                    bus.read_word(sp + offset + 4) as i16,
+                                    bus.read_word(sp + offset + 6) as i16,
+                                )
+                            });
                         self.begin_standard_file_put_tracking(
                             bus,
                             modern_reply,
@@ -13129,6 +13155,7 @@ impl super::TrapDispatcher {
                             pop_total,
                             prompt_ptr,
                             default_name_ptr,
+                            requested_origin,
                         );
                         return Some(Ok(()));
                     }

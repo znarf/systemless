@@ -13556,6 +13556,30 @@ fn sf_put_file_returns_working_directory_refnum_for_current_save_directory() {
 // The retained GUI path must return the same selected-directory WDRefNum
 // as the headless path after the user accepts the save.
 #[test]
+fn sf_put_file_gui_dialog_opens_at_its_where_point() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let screen_base = bus.alloc(800 * 600);
+    disp.set_screen_mode_for_test(screen_base, 800, 800, 600, 8);
+    let sp = TEST_SP;
+    let original_name_ptr = 0x320880u32;
+    let prompt_ptr = 0x3208C0u32;
+    disp.yield_for_ui = true;
+    bus.write_pstring(original_name_ptr, b"Untitled");
+    bus.write_pstring(prompt_ptr, b"Save as:");
+    bus.write_word(sp, 0x0001); // SFPutFile selector
+    bus.write_long(sp + 2, 0x320780); // VAR reply
+    bus.write_long(sp + 10, original_name_ptr); // origName
+    bus.write_long(sp + 14, prompt_ptr); // prompt
+    bus.write_word(sp + 18, 50); // where.v
+    bus.write_word(sp + 20, 104); // where.h
+
+    let start = disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus);
+    assert!(start.unwrap().is_ok());
+    let (top, left, _, _) = disp.standard_file_put_tracking.as_ref().unwrap().bounds;
+    assert_eq!((top, left), (50, 104));
+}
+
+#[test]
 fn sf_put_file_gui_tracking_returns_working_directory_refnum() {
     let (mut disp, mut cpu, mut bus) = setup();
     let screen_base = bus.alloc(800 * 600);
