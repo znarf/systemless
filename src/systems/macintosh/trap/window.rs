@@ -66,6 +66,7 @@ impl super::TrapDispatcher {
     const WDEF_WDRAW_MSG: i16 = 0;
     const WDEF_WCALC_RGNS_MSG: i16 = 2;
     const WDEF_WNEW_MSG: i16 = 3;
+    const WDEF_WDRAW_GICON_MSG: i16 = 6;
     const WDEF_FIRST_APPLICATION_RESOURCE_ID: i16 = 128;
     const WDEF_TRAMPOLINE_SIZE: u32 = 68;
     const AUX_WIN_NEXT_OFFSET: u32 = 0;
@@ -1069,6 +1070,22 @@ impl super::TrapDispatcher {
             proc_id,
             &[(Self::WDEF_WCALC_RGNS_MSG, 0), (Self::WDEF_WDRAW_MSG, 0)],
         )
+    }
+
+    /// Startside's patch: DrawGrowIcon on a window with the application's own WDEF calls it with wDrawGIcon
+    /// (message 6, IM I-299 and I-304): SimCity's WDEF draws its edit window's size box and the line above its
+    /// horizontal scroll bar, which the standard size box drawn instead left out. False when it can't be called.
+    pub(crate) fn arm_window_def_grow_icon<C: CpuOps>(
+        &mut self,
+        cpu: &mut C,
+        bus: &mut MacMemoryBus,
+        window_ptr: u32,
+    ) -> bool {
+        if !self.window_uses_custom_def_proc(bus, window_ptr) || !self.window_visible(bus, window_ptr) {
+            return false;
+        }
+        let proc_id = self.window_proc_ids.get(&window_ptr).copied().unwrap_or(0);
+        self.arm_window_def_messages(cpu, bus, window_ptr, proc_id, &[(Self::WDEF_WDRAW_GICON_MSG, 0)])
     }
 
     fn desktop_gray_region_rect(&self, bus: &MacMemoryBus) -> (i16, i16, i16, i16) {
