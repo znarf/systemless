@@ -12558,9 +12558,101 @@
         );
     }
 
+    // Startside's patch: ModalDialog tracks a checkbox held down as TrackControl does (IM I-323, I-415): its box
+    // drawn two pixels thick while the pointer is inside, back to normal outside, and the item returned only when
+    // the button comes up inside it.
+    #[test]
+    fn modal_dialog_held_checkbox_is_pressed_and_returned_only_when_released_inside() {
+        let (mut disp, mut cpu, mut bus) = setup();
+        let screen_base = 0x300000u32;
+        let row_bytes = 64u32;
+        disp.set_screen_mode_for_test(screen_base, row_bytes, 512, 342, 1);
+        let bounds = (0, 0, 100, 220);
+        let item_rect = (60, 20, 76, 120);
+        let screen_rect = TrapDispatcher::dialog_item_screen_rect(bounds, item_rect);
+        disp.draw_checkbox(&mut bus, screen_rect.0, screen_rect.1, screen_rect.2, screen_rect.3, "Check", false);
+        let mark_rect = TrapDispatcher::dialog_mark_screen_rect(screen_rect);
+        // A pixel of the box's inner edge: white at rest, black pressed.
+        let (probe_x, probe_y) = (mark_rect.1 + 1, mark_rect.0 + 5);
+        assert!(!screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y));
+
+        let dialog_ptr = bus.alloc(170);
+        let item_hit_ptr = bus.alloc(2);
+        let stack_ptr = 0x3F0000u32;
+        let press = |disp: &mut TrapDispatcher, bus: &MacMemoryBus| {
+            let mark = disp.save_dialog_pixels(bus, mark_rect);
+            if let Some(tracking) = disp.dialog_tracking.as_mut() {
+                tracking.active_button = Some(DialogButtonTrackingState {
+                    mouse_down: super::super::dispatch::QueuedEvent {
+                        what: 1,
+                        message: 0,
+                        when: 0,
+                        where_v: 68,
+                        where_h: 60,
+                        modifiers: 0,
+                    },
+                    item_no: 1,
+                    rect: item_rect,
+                    title: "Check".to_string(),
+                    is_default: false,
+                    highlighted: false,
+                    mark: Some(mark),
+                });
+            }
+        };
+        disp.dialog_tracking = Some(DialogTrackingState {
+            dialog_ptr,
+            bounds,
+            items: vec![DialogItem {
+                item_type: 5,
+                rect: item_rect,
+                text: "Check".to_string(),
+                resource_id: 0,
+                proc_ptr: 0,
+                sel_start: 0,
+                sel_end: 0,
+            }],
+            item_hit_ptr,
+            stack_ptr,
+            ..Default::default()
+        });
+        press(&mut disp, &bus);
+
+        disp.input_state.set_mouse_button_for_test(true);
+        disp.input_state.set_mouse_position_for_test((68, 60));
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
+        assert!(
+            screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y),
+            "held inside, the box is drawn pressed"
+        );
+
+        disp.input_state.set_mouse_position_for_test((90, 200));
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
+        assert!(
+            !screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y),
+            "dragged off, the box is back as it was"
+        );
+
+        disp.input_state.set_mouse_button_for_test(false);
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
+        assert!(disp.dialog_tracking.as_ref().is_some_and(|t| t.active_button.is_none()));
+        assert_eq!(bus.read_word(item_hit_ptr), 0, "released outside, nothing is returned");
+
+        press(&mut disp, &bus);
+        disp.input_state.set_mouse_button_for_test(true);
+        disp.input_state.set_mouse_position_for_test((68, 60));
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
+        disp.input_state.set_mouse_button_for_test(false);
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
+        assert!(disp.dialog_tracking.is_none(), "released inside, ModalDialog returns");
+        assert_eq!(bus.read_word(item_hit_ptr), 1);
+        assert_eq!(cpu.read_reg(Register::A7), stack_ptr + 8);
+        assert!(!screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y));
+    }
+
     #[test]
     fn modal_dialog_button_tracking_systemless_theme_routes_pressed_state_through_provider() {
-        let (mut disp, _cpu, mut bus) = setup();
+        let (mut disp, mut cpu, mut bus) = setup();
         let screen_base = 0x300000u32;
         let row_bytes = 64u32;
         let bounds = (0, 0, 100, 220);
@@ -12614,13 +12706,14 @@
                 title: String::new(),
                 is_default: true,
                 highlighted: false,
+                mark: None,
             }),
             ..Default::default()
         });
 
         disp.input_state.set_mouse_button_for_test(true);
         disp.input_state.set_mouse_position_for_test((probe_y, probe_x));
-        disp.handle_dialog_button_tracking(&mut bus);
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
 
         assert!(
             screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y),
@@ -12635,7 +12728,7 @@
         );
 
         disp.input_state.set_mouse_position_for_test((40, 50));
-        disp.handle_dialog_button_tracking(&mut bus);
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
 
         assert!(
             !screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y),

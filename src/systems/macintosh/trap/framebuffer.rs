@@ -6320,9 +6320,18 @@ impl super::TrapDispatcher {
                 // Startside's patch: a push button held down stays inverted while the pointer is inside it (TrackControl
                 // with inButton, IM I-323). The snapshot above is the dialog at rest, so without this the highlight
                 // drawn at the press was painted over on the next frame and never seen.
+                // A checkbox or radio button held (`mark`) has its mark drawn pressed instead.
                 if let Some(button) = tracking.active_button.as_ref().filter(|button| button.highlighted) {
                     let rect = Self::dialog_item_screen_rect(tracking.bounds, button.rect);
-                    self.draw_dialog_button_highlight_state(bus, rect, &button.title, button.is_default, true);
+                    if button.mark.is_some() {
+                        let item_type = tracking
+                            .items
+                            .get(button.item_no.saturating_sub(1) as usize)
+                            .map_or(0, |item| item.item_type);
+                        self.draw_dialog_mark_pressed(bus, rect, crate::dialog_manager::dialog_item_base_type(item_type));
+                    } else {
+                        self.draw_dialog_button_highlight_state(bus, rect, &button.title, button.is_default, true);
+                    }
                 }
 
                 if let Some(ref popup) = tracking.active_popup {
@@ -9139,6 +9148,7 @@ mod redraw_chrome_tests {
                 title: String::new(),
                 is_default: false,
                 highlighted: true,
+                mark: None,
             }),
             ..Default::default()
         });
