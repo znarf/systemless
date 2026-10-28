@@ -796,6 +796,70 @@
         assert_eq!(cpu.read_reg(Register::A7), TEST_SP + 6);
     }
 
+    // Startside's patch: Return flashes an alert's default button once, inverted for 8 ticks however many passes
+    // the trap makes meanwhile, then the alert returns; a click released inside returns at once, with no flash.
+    #[test]
+    fn alert_return_flashes_the_default_button_for_eight_ticks_and_a_click_does_not() {
+        let (mut disp, mut cpu, mut bus) = setup();
+        let screen_base = 0x300000u32;
+        disp.set_screen_mode_for_test(screen_base, 64, 512, 342, 1);
+        let alert_id = 3402;
+        let ditl_id = 3403;
+        let alrt = build_test_alrt((100, 100, 210, 400), ditl_id, 0x5555);
+        let ditl = build_test_ditl_items(&[
+            (4, (70, 230, 90, 290), b"OK"),
+            (8, (16, 20, 56, 280), b"Read this notice before continuing."),
+        ]);
+        disp.install_test_resource(&mut bus, *b"ALRT", alert_id, &alrt);
+        disp.install_test_resource(&mut bus, *b"DITL", ditl_id, &ditl);
+        let ticks = crate::memory::globals::addr::TICKS;
+        let start = |disp: &mut TrapDispatcher, cpu: &mut MockCpu, bus: &mut MacMemoryBus| {
+            cpu.write_reg(Register::A7, TEST_SP);
+            bus.write_long(TEST_SP, 0); // filterProc
+            bus.write_word(TEST_SP + 4, alert_id as u16);
+            bus.write_word(TEST_SP + 6, 0xCAFE);
+            assert!(disp.dispatch_dialog(true, 0x185, cpu, bus).unwrap().is_ok());
+            assert!(disp.dialog_tracking.is_some());
+        };
+
+        start(&mut disp, &mut cpu, &mut bus);
+        bus.write_long(ticks, 1000);
+        disp.push_key_down(0x24, b'\r');
+        for _ in 0..50 {
+            assert!(disp.dispatch_dialog(true, 0x185, &mut cpu, &mut bus).unwrap().is_ok());
+        }
+        assert!(disp.dialog_tracking.is_some(), "many passes in the same tick: the button is still flashing");
+        assert_eq!(disp.dialog_tracking.as_ref().unwrap().flash_remaining, 2, "inverted");
+        bus.write_long(ticks, 1007);
+        assert!(disp.dispatch_dialog(true, 0x185, &mut cpu, &mut bus).unwrap().is_ok());
+        assert!(disp.dialog_tracking.is_some(), "7 ticks: still flashing");
+        bus.write_long(ticks, 1008);
+        for _ in 0..2 {
+            assert!(disp.dispatch_dialog(true, 0x185, &mut cpu, &mut bus).unwrap().is_ok());
+        }
+        assert!(disp.dialog_tracking.is_none(), "8 ticks: the alert returns");
+        assert_eq!(bus.read_word(TEST_SP + 6), 1);
+        disp.push_key_up(0x24, b'\r');
+
+        // A click on OK, already released when read: returned on the next pass, the clock standing still.
+        start(&mut disp, &mut cpu, &mut bus);
+        disp.event_queue.clear();
+        let (top, left, _, _) = disp.dialog_tracking.as_ref().unwrap().bounds;
+        let ok = (top + 80, left + 260);
+        disp.push_mouse_down(ok.0, ok.1);
+        disp.push_mouse_up(ok.0, ok.1);
+        disp.input_state.set_mouse_button_for_test(false);
+        disp.input_state.set_mouse_position_for_test(ok);
+        for _ in 0..4 {
+            assert!(disp.dispatch_dialog(true, 0x185, &mut cpu, &mut bus).unwrap().is_ok());
+            if disp.dialog_tracking.is_none() {
+                break;
+            }
+        }
+        assert!(disp.dialog_tracking.is_none(), "a click returns without a flash");
+        assert_eq!(bus.read_word(TEST_SP + 6), 1);
+    }
+
     #[test]
     fn one_button_alert_remains_modal_until_default_button_is_accepted() {
         // Inside Macintosh Volume I, I-417: Alert displays the alert and
@@ -833,6 +897,9 @@
 
         disp.push_key_down(0x24, b'\r');
         for _ in 0..4 {
+            // Startside's patch: Return flashes the default button for 8 ticks before the alert ends.
+            let ticks = bus.read_long(crate::memory::globals::addr::TICKS);
+            bus.write_long(crate::memory::globals::addr::TICKS, ticks + 9);
             let result = disp.dispatch_dialog(true, 0x185, &mut cpu, &mut bus);
             assert!(result.unwrap().is_ok());
             if disp.dialog_tracking.is_none() {
@@ -7517,7 +7584,10 @@
                 .unwrap()
                 .unwrap();
             disp.push_key_down(0x24, b'\r');
-            for _ in 0..4 {
+            for _ in 0..8 {
+                // Startside's patch: Return flashes the default button for 8 ticks before the alert ends.
+                let ticks = bus.read_long(crate::memory::globals::addr::TICKS);
+                bus.write_long(crate::memory::globals::addr::TICKS, ticks + 9);
                 disp.dispatch_dialog(true, trap_word, &mut cpu, &mut bus)
                     .unwrap()
                     .unwrap();
@@ -12558,9 +12628,125 @@
         );
     }
 
+    // Startside's patch: dBoxProc's frame as System 6 and 7.1 draw it, the same on every side: a one-pixel edge
+    // eight pixels out, two white, a two-pixel band, three white to the content.
+    #[test]
+    fn classic_dbox_frame_is_the_same_on_every_side() {
+        let (disp, _cpu, mut bus) = setup();
+        let mut disp = disp;
+        let screen_base = 0x300000u32;
+        let row_bytes = 64u32;
+        disp.set_screen_mode_for_test(screen_base, row_bytes, 512, 342, 1);
+        let (top, left, bottom, right) = (100i16, 100i16, 200i16, 300i16);
+        disp.draw_classic_dbox_frame(&mut bus, top, left, bottom, right);
+        let along_row = |bus: &MacMemoryBus, x: i16| screen_pixel_is_set(bus, screen_base, row_bytes, x, 150);
+        let along_col = |bus: &MacMemoryBus, y: i16| screen_pixel_is_set(bus, screen_base, row_bytes, 200, y);
+        // Out from the content: 3 white, 2 black, 2 white, 1 black.
+        let expected = [false, false, false, true, true, false, false, true];
+        for (i, &black) in expected.iter().enumerate() {
+            let d = i as i16;
+            assert_eq!(along_row(&bus, left - 1 - d), black, "left, {} out", d + 1);
+            assert_eq!(along_row(&bus, right + d), black, "right, {} out", d + 1);
+            assert_eq!(along_col(&bus, top - 1 - d), black, "top, {} out", d + 1);
+            assert_eq!(along_col(&bus, bottom + d), black, "bottom, {} out", d + 1);
+        }
+    }
+
+    // Startside's patch: ModalDialog tracks a checkbox held down as TrackControl does (IM I-323, I-415): its box
+    // drawn two pixels thick while the pointer is inside, back to normal outside, and the item returned only when
+    // the button comes up inside it.
+    #[test]
+    fn modal_dialog_held_checkbox_is_pressed_and_returned_only_when_released_inside() {
+        let (mut disp, mut cpu, mut bus) = setup();
+        let screen_base = 0x300000u32;
+        let row_bytes = 64u32;
+        disp.set_screen_mode_for_test(screen_base, row_bytes, 512, 342, 1);
+        let bounds = (0, 0, 100, 220);
+        let item_rect = (60, 20, 76, 120);
+        let screen_rect = TrapDispatcher::dialog_item_screen_rect(bounds, item_rect);
+        disp.draw_checkbox(&mut bus, screen_rect.0, screen_rect.1, screen_rect.2, screen_rect.3, "Check", false);
+        let mark_rect = TrapDispatcher::dialog_mark_screen_rect(screen_rect);
+        // A pixel of the box's inner edge: white at rest, black pressed.
+        let (probe_x, probe_y) = (mark_rect.1 + 1, mark_rect.0 + 5);
+        assert!(!screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y));
+
+        let dialog_ptr = bus.alloc(170);
+        let item_hit_ptr = bus.alloc(2);
+        let stack_ptr = 0x3F0000u32;
+        let press = |disp: &mut TrapDispatcher, bus: &MacMemoryBus| {
+            let mark = disp.save_dialog_pixels(bus, mark_rect);
+            if let Some(tracking) = disp.dialog_tracking.as_mut() {
+                tracking.active_button = Some(DialogButtonTrackingState {
+                    mouse_down: super::super::dispatch::QueuedEvent {
+                        what: 1,
+                        message: 0,
+                        when: 0,
+                        where_v: 68,
+                        where_h: 60,
+                        modifiers: 0,
+                    },
+                    item_no: 1,
+                    rect: item_rect,
+                    title: "Check".to_string(),
+                    is_default: false,
+                    highlighted: false,
+                    mark: Some(mark),
+                });
+            }
+        };
+        disp.dialog_tracking = Some(DialogTrackingState {
+            dialog_ptr,
+            bounds,
+            items: vec![DialogItem {
+                item_type: 5,
+                rect: item_rect,
+                text: "Check".to_string(),
+                resource_id: 0,
+                proc_ptr: 0,
+                sel_start: 0,
+                sel_end: 0,
+            }],
+            item_hit_ptr,
+            stack_ptr,
+            ..Default::default()
+        });
+        press(&mut disp, &bus);
+
+        disp.input_state.set_mouse_button_for_test(true);
+        disp.input_state.set_mouse_position_for_test((68, 60));
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
+        assert!(
+            screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y),
+            "held inside, the box is drawn pressed"
+        );
+
+        disp.input_state.set_mouse_position_for_test((90, 200));
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
+        assert!(
+            !screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y),
+            "dragged off, the box is back as it was"
+        );
+
+        disp.input_state.set_mouse_button_for_test(false);
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
+        assert!(disp.dialog_tracking.as_ref().is_some_and(|t| t.active_button.is_none()));
+        assert_eq!(bus.read_word(item_hit_ptr), 0, "released outside, nothing is returned");
+
+        press(&mut disp, &bus);
+        disp.input_state.set_mouse_button_for_test(true);
+        disp.input_state.set_mouse_position_for_test((68, 60));
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
+        disp.input_state.set_mouse_button_for_test(false);
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
+        assert!(disp.dialog_tracking.is_none(), "released inside, ModalDialog returns");
+        assert_eq!(bus.read_word(item_hit_ptr), 1);
+        assert_eq!(cpu.read_reg(Register::A7), stack_ptr + 8);
+        assert!(!screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y));
+    }
+
     #[test]
     fn modal_dialog_button_tracking_systemless_theme_routes_pressed_state_through_provider() {
-        let (mut disp, _cpu, mut bus) = setup();
+        let (mut disp, mut cpu, mut bus) = setup();
         let screen_base = 0x300000u32;
         let row_bytes = 64u32;
         let bounds = (0, 0, 100, 220);
@@ -12614,13 +12800,14 @@
                 title: String::new(),
                 is_default: true,
                 highlighted: false,
+                mark: None,
             }),
             ..Default::default()
         });
 
         disp.input_state.set_mouse_button_for_test(true);
         disp.input_state.set_mouse_position_for_test((probe_y, probe_x));
-        disp.handle_dialog_button_tracking(&mut bus);
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
 
         assert!(
             screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y),
@@ -12635,7 +12822,7 @@
         );
 
         disp.input_state.set_mouse_position_for_test((40, 50));
-        disp.handle_dialog_button_tracking(&mut bus);
+        disp.handle_dialog_button_tracking(&mut cpu, &mut bus);
 
         assert!(
             !screen_pixel_is_set(&bus, screen_base, row_bytes, probe_x, probe_y),

@@ -772,6 +772,18 @@ pub(crate) struct StandardFilePutTrackingState {
     pub saved_pixels: SavedPixels,
 }
 
+/// Startside's patch: a Standard File button held down (`standard_file_pressed`).
+#[derive(Clone, Debug)]
+pub(crate) struct StandardFilePressedButton {
+    /// Where the mouse went down, global: the click acted on at release.
+    pub press: (i16, i16),
+    /// The button's rect, local to the dialog.
+    pub rect: (i16, i16, i16, i16),
+    pub title: &'static str,
+    pub is_default: bool,
+    pub highlighted: bool,
+}
+
 /// Candidate file shown by a retained Standard File get dialog.
 #[derive(Clone, Debug)]
 pub(crate) struct StandardFileGetEntry {
@@ -825,6 +837,9 @@ pub struct DialogButtonTrackingState {
     pub title: String,
     pub is_default: bool,
     pub highlighted: bool,
+    /// Startside's patch: for a checkbox or radio button, its mark as drawn before the press, put back when the
+    /// pointer leaves it or the button comes up; `None` for a push button.
+    pub mark: Option<SavedPixels>,
 }
 
 /// Push-button/click tracking for a front modal dialog. ModalDialog-retained
@@ -2269,6 +2284,8 @@ pub struct TrapDispatcher {
     pub(crate) vbl_tasks: crate::process_context::SharedProcessVblTasks,
     /// Active dialog tracking state (non-None while ModalDialog is tracking input)
     pub dialog_tracking: Option<DialogTrackingState>,
+    /// Startside's patch: the Ticks of a dialog button flash's last step (its `flash_delay` counts ticks from it).
+    pub(crate) dialog_flash_tick: Option<u32>,
     pub(crate) suspended_modal_dialogs: Vec<DialogTrackingState>,
     /// Active Standard File Package save dialog tracking state.
     pub(crate) standard_file_put_tracking: Option<StandardFilePutTrackingState>,
@@ -2278,6 +2295,9 @@ pub struct TrapDispatcher {
     /// idle pass that consumed no event redraws the dialog only when the
     /// screen under its frame changed since.
     pub(crate) standard_file_drawn: Option<crate::memory::presentation::ScreenMark>,
+    /// Startside's patch: the Standard File button held down, tracked until the button comes up (TrackControl's
+    /// inButton, IM I-323): drawn inverted while the pointer is inside it, acting only when released inside.
+    pub(crate) standard_file_pressed: Option<StandardFilePressedButton>,
     /// Bounds owned by retained host overlays in an attached CPU adapter.
     /// These surfaces draw directly into the framebuffer without WindowRecords.
     pub(crate) external_host_overlay_rects: Vec<(i16, i16, i16, i16)>,
@@ -4146,9 +4166,11 @@ impl TrapDispatcher {
             sleep_queue: Vec::new(),
             vbl_tasks: Default::default(),
             dialog_tracking: None,
+            dialog_flash_tick: None,
             suspended_modal_dialogs: Vec::new(),
             standard_file_put_tracking: None,
             standard_file_drawn: None,
+            standard_file_pressed: None,
             standard_file_get_tracking: None,
             external_host_overlay_rects: Vec::new(),
             dialog_items: HashMap::default(),

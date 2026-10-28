@@ -545,6 +545,21 @@ impl super::TrapDispatcher {
         "..##....##..",
         "....####....",
     ];
+    /// Startside's patch: a radio button held down, its circle drawn two pixels thick (as a checkbox's box).
+    const CLASSIC_RADIO_PRESSED_12: [&'static str; 12] = [
+        "....####....",
+        "..########..",
+        ".###....###.",
+        ".##......##.",
+        "##........##",
+        "##........##",
+        "##........##",
+        "##........##",
+        ".##......##.",
+        ".###....###.",
+        "..########..",
+        "....####....",
+    ];
     const CLASSIC_RADIO_DOT_12: [&'static str; 12] = [
         "............",
         "............",
@@ -4192,7 +4207,7 @@ impl super::TrapDispatcher {
             .as_ref()
             .is_some_and(|tracking| tracking.active_button.is_some())
         {
-            self.handle_dialog_button_tracking(bus);
+            self.handle_dialog_button_tracking(cpu, bus);
             return;
         }
 
@@ -4201,14 +4216,17 @@ impl super::TrapDispatcher {
             .as_ref()
             .is_some_and(|tracking| tracking.flash_remaining > 0)
         {
+            // Startside's patch: the flash counts ticks, not passes (many a tick), and goes on at once after a step.
+            let tick = bus.read_long(crate::memory::globals::addr::TICKS);
             let (remaining, button_draw, finished_hit) = {
                 let t = self.dialog_tracking.as_mut().unwrap();
-                if t.flash_delay > 0 {
-                    t.flash_delay -= 1;
+                let since = *self.dialog_flash_tick.get_or_insert(tick);
+                if tick.wrapping_sub(since) < u32::from(t.flash_delay) {
                     return;
                 }
+                self.dialog_flash_tick = Some(tick);
                 t.flash_remaining -= 1;
-                t.flash_delay = 3;
+                t.flash_delay = 0;
                 let remaining = t.flash_remaining;
                 let flash_item = t.flash_item;
                 let button_draw =
@@ -4317,6 +4335,7 @@ impl super::TrapDispatcher {
                         title: item.text.clone(),
                         is_default,
                         highlighted: true,
+                        mark: None,
                     });
                 } else {
                     self.start_dialog_button_flash(
@@ -4347,7 +4366,22 @@ impl super::TrapDispatcher {
                     )
                 })
                 .unwrap_or(0);
-                if hit > 0 {
+                // Startside's patch: the button flashes first, as in a dialog (`start_dialog_button_key_flash`); the
+                // alert ended at once.
+                let button = self.dialog_tracking.as_ref().and_then(|tracking| {
+                    let item = tracking.items.get(hit.checked_sub(1)? as usize)?;
+                    (dialog_item_base_type(item.item_type) == DIALOG_ITEM_BUTTON).then(|| {
+                        (
+                            Self::dialog_item_screen_rect(tracking.bounds, item.rect),
+                            item.text.clone(),
+                            hit == tracking.default_item,
+                        )
+                    })
+                });
+                if let Some((rect, title, is_default)) = button {
+                    self.draw_dialog_button_highlight_state(bus, rect, &title, is_default, true);
+                    self.start_dialog_button_key_flash(hit);
+                } else if hit > 0 {
                     self.finish_interactive_alert(cpu, bus, hit);
                 }
             }
@@ -7642,20 +7676,19 @@ impl super::TrapDispatcher {
             (top, left, bottom, right),
         );
 
-        // System 7.5.3's standard WDEF draws an asymmetric black structure
-        // edge: one pixel on top/left and a two-pixel shadow edge on
-        // bottom/right, with a two-pixel inner band inset from the outer edge.
+        // Startside's patch: System 6's and 7.1's dBoxProc, as the user's System 7.1 screenshots show it: a
+        // one-pixel black edge eight pixels out on every side, two white, then a two-pixel band, then three white to
+        // the content. It was System 7.5.3's asymmetric frame (a two-pixel shadow edge and a one-pixel band on the
+        // bottom and right).
         self.fill_dialog_rect(bus, top - 8, left - 8, top - 7, right + 8, true);
+        self.fill_dialog_rect(bus, bottom + 7, left - 8, bottom + 8, right + 8, true);
         self.fill_dialog_rect(bus, top - 8, left - 8, bottom + 8, left - 7, true);
-        self.fill_dialog_rect(bus, top - 8, right + 6, bottom + 8, right + 8, true);
-        self.fill_dialog_rect(bus, bottom + 6, left - 8, bottom + 8, right + 8, true);
+        self.fill_dialog_rect(bus, top - 8, right + 7, bottom + 8, right + 8, true);
 
-        self.fill_dialog_rect(bus, top - 5, left - 5, top - 4, right + 5, true);
-        self.fill_dialog_rect(bus, top - 4, left - 5, top - 3, right + 4, true);
-        self.fill_dialog_rect(bus, top - 5, left - 5, bottom + 5, left - 4, true);
-        self.fill_dialog_rect(bus, top - 5, left - 4, bottom + 4, left - 3, true);
-        self.fill_dialog_rect(bus, top - 5, right + 3, bottom + 4, right + 4, true);
-        self.fill_dialog_rect(bus, bottom + 3, left - 5, bottom + 4, right + 4, true);
+        self.fill_dialog_rect(bus, top - 5, left - 5, top - 3, right + 5, true);
+        self.fill_dialog_rect(bus, bottom + 3, left - 5, bottom + 5, right + 5, true);
+        self.fill_dialog_rect(bus, top - 5, left - 5, bottom + 5, left - 3, true);
+        self.fill_dialog_rect(bus, top - 5, right + 3, bottom + 5, right + 5, true);
     }
 
     /// Draw a 2-pixel shadow on bottom and right edges.
@@ -8450,7 +8483,7 @@ impl super::TrapDispatcher {
         self.fill_dialog_rect(bus, bottom - 1, left + 3, bottom, right - 3, true);
     }
 
-    fn draw_dialog_button_highlight_state(
+    pub(crate) fn draw_dialog_button_highlight_state(
         &self,
         bus: &mut MacMemoryBus,
         rect: (i16, i16, i16, i16),
@@ -8824,6 +8857,46 @@ impl super::TrapDispatcher {
         );
         if inactive || dim_disabled_title {
             self.dim_rect(bus, label_top, label_left, label_bottom, label_right);
+        }
+    }
+
+    /// Startside's patch: where a checkbox's or radio button's 12-pixel mark is, for its item's screen rect (as
+    /// `draw_checkbox_state` and `draw_radio_state` place it).
+    pub(crate) fn dialog_mark_screen_rect(item_rect: (i16, i16, i16, i16)) -> (i16, i16, i16, i16) {
+        let (top, left, bottom, _) = item_rect;
+        let size = Self::STANDARD_CONTROL_MARK_SIZE;
+        let mark_top = top + (bottom - top - size) / 2;
+        let mark_left = left + Self::STANDARD_CONTROL_MARK_LEFT_INSET;
+        (mark_top, mark_left, mark_top + size, mark_left + size)
+    }
+
+    /// Startside's patch: a checkbox or radio button held down with the pointer inside it (TrackControl's
+    /// inCheckBox, IM I-323): its box or circle drawn two pixels thick, the System's pressed look. Drawn over the
+    /// mark as it is; the caller puts the saved mark back to undo it.
+    pub(crate) fn draw_dialog_mark_pressed(
+        &self,
+        bus: &mut MacMemoryBus,
+        item_rect: (i16, i16, i16, i16),
+        base_type: u8,
+    ) {
+        let (top, left, bottom, right) = Self::dialog_mark_screen_rect(item_rect);
+        if base_type == DIALOG_ITEM_RADIO {
+            let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
+                self.get_screen_params();
+            self.draw_control_mask_12(
+                bus,
+                screen_base,
+                row_bytes,
+                pixel_size,
+                screen_width,
+                screen_height,
+                left,
+                top,
+                &Self::CLASSIC_RADIO_PRESSED_12,
+            );
+        } else {
+            self.draw_rect_border(bus, top, left, bottom, right);
+            self.draw_rect_border(bus, top + 1, left + 1, bottom - 1, right - 1);
         }
     }
 
@@ -10387,7 +10460,7 @@ impl super::TrapDispatcher {
         }
     }
 
-    fn consume_dialog_mouse_up(&mut self) -> bool {
+    pub(crate) fn consume_dialog_mouse_up(&mut self) -> bool {
         let next_mouse_event = self
             .event_queue
             .iter()
@@ -10409,7 +10482,7 @@ impl super::TrapDispatcher {
             .then(|| mouse_down.clone());
     }
 
-    fn dialog_item_screen_rect(
+    pub(crate) fn dialog_item_screen_rect(
         bounds: (i16, i16, i16, i16),
         rect: (i16, i16, i16, i16),
     ) -> (i16, i16, i16, i16) {
@@ -10445,9 +10518,27 @@ impl super::TrapDispatcher {
             let screen_rect = Self::dialog_item_screen_rect(bounds, rect);
             self.draw_dialog_button_highlight_state(bus, screen_rect, title, is_default, true);
         }
+        // Startside's patch: a click acts once, with no flash (TrackControl has already shown the press): the item
+        // is returned on the next pass. Only Return or Enter flashes the default button
+        // (`start_dialog_button_key_flash`). It flashed three times.
+        self.dialog_flash_tick = None;
         if let Some(t) = self.dialog_tracking.as_mut() {
-            t.flash_remaining = 6;
-            t.flash_delay = 3;
+            t.flash_remaining = 1;
+            t.flash_delay = 0;
+            t.flash_item = item_no;
+        }
+    }
+
+    /// Startside's patch: Return or Enter (or the cancel keys) flash the button once, inverted for about 8 ticks as
+    /// the Dialog Manager's own filter does, then the item is returned (`flash_remaining` 2: inverted for
+    /// `flash_delay` ticks, then drawn normal and returned).
+    const DIALOG_KEY_FLASH_TICKS: u8 = 8;
+
+    pub(crate) fn start_dialog_button_key_flash(&mut self, item_no: i16) {
+        self.dialog_flash_tick = None;
+        if let Some(t) = self.dialog_tracking.as_mut() {
+            t.flash_remaining = 2;
+            t.flash_delay = Self::DIALOG_KEY_FLASH_TICKS;
             t.flash_item = item_no;
         }
     }
@@ -10637,7 +10728,7 @@ impl super::TrapDispatcher {
         cpu.write_reg(Register::A7, saved.stack_ptr + 8);
     }
 
-    fn handle_dialog_button_tracking(&mut self, bus: &mut MacMemoryBus) {
+    fn handle_dialog_button_tracking<C: CpuOps>(&mut self, cpu: &mut C, bus: &mut MacMemoryBus) {
         let Some((
             dialog_ptr,
             bounds,
@@ -10648,6 +10739,7 @@ impl super::TrapDispatcher {
             is_default,
             highlighted,
             item_type,
+            mark,
         )) = self.dialog_tracking.as_ref().and_then(|tracking| {
             tracking.active_button.as_ref().map(|button| {
                 (
@@ -10664,6 +10756,7 @@ impl super::TrapDispatcher {
                         .get(button.item_no.saturating_sub(1) as usize)
                         .map(|item| item.item_type)
                         .unwrap_or(4),
+                    button.mark.clone(),
                 )
             })
         })
@@ -10674,6 +10767,80 @@ impl super::TrapDispatcher {
         let (top, left, bottom, right) = Self::dialog_item_screen_rect(bounds, rect);
         let (mouse_v, mouse_h) = self.input_state.mouse_position();
         let inside = mouse_v >= top && mouse_v < bottom && mouse_h >= left && mouse_h < right;
+
+        // Startside's patch: a checkbox or radio button held down (`mark`) is drawn pressed while the pointer is
+        // inside it, and ModalDialog returns it only when the button comes up inside it (IM I-415, TrackControl).
+        if let Some(mark) = mark {
+            let item_rect = (top, left, bottom, right);
+            let mark_rect = Self::dialog_mark_screen_rect(item_rect);
+            if self.input_state.mouse_button_pressed() {
+                if inside != highlighted {
+                    if inside {
+                        self.draw_dialog_mark_pressed(bus, item_rect, dialog_item_base_type(item_type));
+                    } else {
+                        self.restore_dialog_pixels(bus, mark_rect, &mark);
+                    }
+                    if let Some(button) = self
+                        .dialog_tracking
+                        .as_mut()
+                        .and_then(|tracking| tracking.active_button.as_mut())
+                    {
+                        button.highlighted = inside;
+                    }
+                }
+                return;
+            }
+            if highlighted {
+                self.restore_dialog_pixels(bus, mark_rect, &mark);
+            }
+            self.consume_or_retain_dialog_mouse_up(&mouse_down);
+            if let Some(t) = self.dialog_tracking.as_mut() {
+                t.active_button = None;
+            }
+            if !inside {
+                self.record_modal_dialog_input_trace(
+                    "release",
+                    dialog_ptr,
+                    bounds,
+                    item_no,
+                    Some(item_type),
+                    Some(false),
+                    "pending",
+                    "mark_no_selection",
+                );
+                return;
+            }
+            // As a click returns a checkbox at once (the dialog stays up, the application changes its value).
+            let (dlg_ptr, edit_item, edit_text, items) = {
+                let tracking = self.dialog_tracking.as_mut().unwrap();
+                Self::sync_tracking_active_edit_item(tracking);
+                (
+                    tracking.dialog_ptr,
+                    tracking.edit_item,
+                    tracking.edit_text.clone(),
+                    tracking.items.clone(),
+                )
+            };
+            self.flush_dialog_edit_item_texts(bus, dlg_ptr, &items, edit_item, &edit_text);
+            let saved = self.dialog_tracking.take().unwrap();
+            self.persist_visible_dialog_snapshot(bus, &saved);
+            self.dialog_saved_pixels.insert(saved.dialog_ptr, saved.saved_pixels);
+            if saved.item_hit_ptr != 0 {
+                bus.write_word(saved.item_hit_ptr, item_no as u16);
+            }
+            self.record_modal_dialog_input_trace(
+                "release",
+                dialog_ptr,
+                bounds,
+                item_no,
+                Some(item_type),
+                Some(true),
+                "returned",
+                "mark_item_hit_retained",
+            );
+            cpu.write_reg(Register::A7, saved.stack_ptr + 8);
+            return;
+        }
 
         if self.input_state.mouse_button_pressed() {
             if inside != highlighted {
@@ -12264,7 +12431,7 @@ impl super::TrapDispatcher {
 
                 if let Some(ref tracking) = self.dialog_tracking {
                     if tracking.active_button.is_some() {
-                        self.handle_dialog_button_tracking(bus);
+                        self.handle_dialog_button_tracking(cpu, bus);
                         return Some(Ok(()));
                     }
 
@@ -12472,14 +12639,18 @@ impl super::TrapDispatcher {
                     if flash_remaining > 0 {
                         // Button flash animation
                         let flash_item = self.dialog_tracking.as_ref().unwrap().flash_item;
+                        // Startside's patch: the flash counts ticks, not passes (many a tick), and goes on at once
+                        // after a step.
+                        let tick = bus.read_long(crate::memory::globals::addr::TICKS);
                         let (remaining, button_draw) = {
                             let t = self.dialog_tracking.as_mut().unwrap();
-                            if t.flash_delay > 0 {
-                                t.flash_delay -= 1;
+                            let since = *self.dialog_flash_tick.get_or_insert(tick);
+                            if tick.wrapping_sub(since) < u32::from(t.flash_delay) {
                                 return Some(Ok(()));
                             }
+                            self.dialog_flash_tick = Some(tick);
                             t.flash_remaining -= 1;
-                            t.flash_delay = 3;
+                            t.flash_delay = 0;
                             let remaining = t.flash_remaining;
                             let button_draw = if remaining > 0
                                 && flash_item > 0
@@ -12746,6 +12917,7 @@ impl super::TrapDispatcher {
                                                             title: item.text.clone(),
                                                             is_default,
                                                             highlighted: true,
+                                                            mark: None,
                                                         },
                                                     );
                                                     self.record_modal_dialog_input_trace(
@@ -12774,6 +12946,40 @@ impl super::TrapDispatcher {
                                                         "start_flash",
                                                     );
                                                 }
+                                            }
+                                            // Startside's patch: a checkbox or radio button still held is tracked
+                                            // as a push button is, and returned only if released inside it.
+                                            DIALOG_ITEM_CHECKBOX | DIALOG_ITEM_RADIO
+                                                if self.input_state.mouse_button_pressed() =>
+                                            {
+                                                let screen_rect =
+                                                    Self::dialog_item_screen_rect(bounds, item.rect);
+                                                let mark = self.save_dialog_pixels(
+                                                    bus,
+                                                    Self::dialog_mark_screen_rect(screen_rect),
+                                                );
+                                                self.draw_dialog_mark_pressed(bus, screen_rect, base_type);
+                                                let t = self.dialog_tracking.as_mut().unwrap();
+                                                t.active_button =
+                                                    Some(super::dispatch::DialogButtonTrackingState {
+                                                        mouse_down: e.clone(),
+                                                        item_no: hit,
+                                                        rect: item.rect,
+                                                        title: item.text.clone(),
+                                                        is_default: false,
+                                                        highlighted: true,
+                                                        mark: Some(mark),
+                                                    });
+                                                self.record_modal_dialog_input_trace(
+                                                    "mouse_down",
+                                                    dialog_ptr,
+                                                    bounds,
+                                                    hit,
+                                                    Some(item.item_type),
+                                                    Some(true),
+                                                    "pending",
+                                                    "mark_tracking_started",
+                                                );
                                             }
                                             // Checkbox click: return item number immediately
                                             // The dialog stays on screen — the app toggles
@@ -13022,10 +13228,7 @@ impl super::TrapDispatcher {
                                                 is_default,
                                                 true,
                                             );
-                                            let t = self.dialog_tracking.as_mut().unwrap();
-                                            t.flash_remaining = 6;
-                                            t.flash_delay = 3;
-                                            t.flash_item = def;
+                                            self.start_dialog_button_key_flash(def);
                                         }
                                     }
                                     crate::dialog_manager::DialogFilterDecision::TriggerCancelButton => {
@@ -13060,10 +13263,7 @@ impl super::TrapDispatcher {
                                                 is_default,
                                                 true,
                                             );
-                                            let t = self.dialog_tracking.as_mut().unwrap();
-                                            t.flash_remaining = 6;
-                                            t.flash_delay = 3;
-                                            t.flash_item = cancel;
+                                            self.start_dialog_button_key_flash(cancel);
                                         }
                                     }
                                     crate::dialog_manager::DialogFilterDecision::AdvanceEditTextFocus => {

@@ -3346,6 +3346,12 @@ impl super::TrapDispatcher {
     /// Draw the menu bar at the top of the screen.
     /// Height is read from the MBarHeight low-memory global ($0BAA).
     /// If MBarHeight is 0, the menu bar is hidden (full-screen mode).
+    /// Startside's patch: every menu title is drawn dimmed, none highlighted, while Standard File's dialog is up
+    /// (System 7.1's look: its menus can't be used meanwhile).
+    pub(crate) fn menu_bar_dimmed_for_dialog(&self) -> bool {
+        self.standard_file_put_tracking.is_some() || self.standard_file_get_tracking.is_some()
+    }
+
     pub(crate) fn draw_menu_bar_to_fb(&self, bus: &mut MacMemoryBus) {
         if self.fullscreen_locked || self.menu_bar_hidden {
             return;
@@ -3368,10 +3374,10 @@ impl super::TrapDispatcher {
                 .filter_map(|(i, region)| {
                     self.menus
                         .get(i)
-                        .map(|menu| (menu.id, menu.title.clone(), menu.enabled, region))
+                        .map(|menu| (menu.id, menu.title.clone(), menu.enabled && !self.menu_bar_dimmed_for_dialog(), region))
                 })
                 .collect(),
-            highlighted: self.current_menu_bar_highlight_index(bus),
+            highlighted: self.current_menu_bar_highlight_index(bus).filter(|_| !self.menu_bar_dimmed_for_dialog()),
             outline_scale: bus.outline_presentation_scale(),
         });
         // A palette change alone need not invalidate the cached bar: replay
@@ -3553,7 +3559,7 @@ impl super::TrapDispatcher {
                 region.left,
                 menu_bar_height - 1,
                 region.right,
-                menu.enabled,
+                menu.enabled && !self.menu_bar_dimmed_for_dialog(),
                 false,
             );
             let title_index = Self::menu_title_pixel_index(bus, menu.id, pixel_size);
@@ -3564,7 +3570,8 @@ impl super::TrapDispatcher {
             // p. V-142) and draws solid grey glyphs; a device with no
             // intermediate shade gets the title drawn and then knocked back
             // with the 50% grey pattern.
-            let dim_title = self.ui_theme_id() == UiThemeId::ClassicSystem7 && !menu.enabled;
+            let dim_title = self.ui_theme_id() == UiThemeId::ClassicSystem7
+                && (!menu.enabled || self.menu_bar_dimmed_for_dialog());
             let dim_index = if dim_title {
                 Self::menu_dim_pixel_index(bus, pixel_size, title_index, title_bg_index)
             } else {
@@ -3635,7 +3642,10 @@ impl super::TrapDispatcher {
             }
         }
 
-        if let Some(menu_idx) = self.current_menu_bar_highlight_index(bus) {
+        if let Some(menu_idx) = self
+            .current_menu_bar_highlight_index(bus)
+            .filter(|_| !self.menu_bar_dimmed_for_dialog())
+        {
             self.highlight_menu_title(bus, menu_idx);
         }
 
@@ -6317,6 +6327,23 @@ impl super::TrapDispatcher {
                         if tracking.flash_remaining % 2 == 0 {
                             self.invert_button_rect(bus, abs_top, abs_left, abs_bottom, abs_right);
                         }
+                    }
+                }
+
+                // Startside's patch: a push button held down stays inverted while the pointer is inside it (TrackControl
+                // with inButton, IM I-323). The snapshot above is the dialog at rest, so without this the highlight
+                // drawn at the press was painted over on the next frame and never seen.
+                // A checkbox or radio button held (`mark`) has its mark drawn pressed instead.
+                if let Some(button) = tracking.active_button.as_ref().filter(|button| button.highlighted) {
+                    let rect = Self::dialog_item_screen_rect(tracking.bounds, button.rect);
+                    if button.mark.is_some() {
+                        let item_type = tracking
+                            .items
+                            .get(button.item_no.saturating_sub(1) as usize)
+                            .map_or(0, |item| item.item_type);
+                        self.draw_dialog_mark_pressed(bus, rect, crate::dialog_manager::dialog_item_base_type(item_type));
+                    } else {
+                        self.draw_dialog_button_highlight_state(bus, rect, &button.title, button.is_default, true);
                     }
                 }
 
@@ -9087,6 +9114,66 @@ mod redraw_chrome_tests {
             0x00,
             "once the dialog snapshot is final, normal port blitting should resume"
         );
+    }
+
+    // Startside's patch: the chrome pass restores a ModalDialog's snapshot at rest every frame; a push button held
+    // down must still show inverted after it, and go back to normal once the pointer leaves it.
+    #[test]
+    fn redraw_chrome_keeps_a_held_dialog_button_inverted() {
+        let (mut disp, _cpu, mut bus) = setup_with_port();
+
+        let screen_base = bus.alloc(64 * 64);
+        for i in 0..64u32 * 64 {
+            bus.write_byte(screen_base + i, 0x00);
+        }
+        disp.screen_mode = (screen_base, 64, 64, 64, 8);
+        bus.write_long(0x0824, screen_base);
+        bus.write_word(crate::memory::globals::addr::MBAR_HEIGHT, 0);
+
+        let bounds = (10, 10, 50, 60);
+        let at_rest = disp.save_dialog_pixels(&bus, bounds);
+        let item_rect = (10, 10, 30, 40);
+        let probe = screen_base + 30 * 64 + 35;
+
+        disp.dialog_tracking = Some(super::super::dispatch::DialogTrackingState {
+            bounds,
+            game_managed: false,
+            draw_procs_done: true,
+            rendered_pixels: at_rest,
+            rendered_pixels_final: true,
+            filter_presentation_epoch: None,
+            items: vec![DialogItem {
+                item_type: 4,
+                rect: item_rect,
+                ..DialogItem::default()
+            }],
+            active_button: Some(super::super::dispatch::DialogButtonTrackingState {
+                mouse_down: super::super::dispatch::QueuedEvent {
+                    what: 1,
+                    message: 0,
+                    when: 0,
+                    where_v: 30,
+                    where_h: 35,
+                    modifiers: 0,
+                },
+                item_no: 1,
+                rect: item_rect,
+                title: String::new(),
+                is_default: false,
+                highlighted: true,
+                mark: None,
+            }),
+            ..Default::default()
+        });
+
+        disp.redraw_chrome(&mut bus);
+        assert_ne!(bus.read_byte(probe), 0x00, "a held button stays inverted after the snapshot is restored");
+
+        if let Some(button) = disp.dialog_tracking.as_mut().and_then(|tracking| tracking.active_button.as_mut()) {
+            button.highlighted = false;
+        }
+        disp.redraw_chrome(&mut bus);
+        assert_eq!(bus.read_byte(probe), 0x00, "with the pointer outside it the button is drawn at rest");
     }
 
     #[test]
