@@ -777,6 +777,75 @@
         assert_eq!(cpu.read_reg(Register::A7), TEST_SP + 6);
     }
 
+    // Return flashes an alert's default button once, inverted for 8 ticks
+    // however many passes the trap makes meanwhile, then the alert returns; a
+    // click released inside returns at once, with no flash.
+    #[test]
+    fn alert_return_flashes_the_default_button_for_eight_ticks_and_a_click_does_not() {
+        let (mut disp, mut cpu, mut bus) = setup();
+        let screen_base = 0x300000u32;
+        disp.set_screen_mode_for_test(screen_base, 64, 512, 342, 1);
+        let alert_id = 3402;
+        let ditl_id = 3403;
+        let alrt = build_test_alrt((100, 100, 210, 400), ditl_id, 0x5555);
+        let ditl = build_test_ditl_items(&[
+            (4, (70, 230, 90, 290), b"OK"),
+            (8, (16, 20, 56, 280), b"Read this notice before continuing."),
+        ]);
+        disp.install_test_resource(&mut bus, *b"ALRT", alert_id, &alrt);
+        disp.install_test_resource(&mut bus, *b"DITL", ditl_id, &ditl);
+        let ticks = crate::memory::globals::addr::TICKS;
+        let start = |disp: &mut TrapDispatcher, cpu: &mut MockCpu, bus: &mut MacMemoryBus| {
+            cpu.write_reg(Register::A7, TEST_SP);
+            bus.write_long(TEST_SP, 0); // filterProc
+            bus.write_word(TEST_SP + 4, alert_id as u16);
+            bus.write_word(TEST_SP + 6, 0xCAFE);
+            assert!(disp.dispatch_dialog(true, 0x185, cpu, bus).unwrap().is_ok());
+            assert!(disp.dialog_tracking.is_some());
+        };
+
+        start(&mut disp, &mut cpu, &mut bus);
+        bus.write_long(ticks, 1000);
+        disp.push_key_down(0x24, b'\r');
+        for _ in 0..50 {
+            assert!(disp.dispatch_dialog(true, 0x185, &mut cpu, &mut bus).unwrap().is_ok());
+        }
+        assert!(
+            disp.dialog_tracking.is_some(),
+            "many passes in the same tick: the button is still flashing"
+        );
+        assert_eq!(disp.dialog_tracking.as_ref().unwrap().flash_remaining, 2, "inverted");
+        bus.write_long(ticks, 1007);
+        assert!(disp.dispatch_dialog(true, 0x185, &mut cpu, &mut bus).unwrap().is_ok());
+        assert!(disp.dialog_tracking.is_some(), "7 ticks: still flashing");
+        bus.write_long(ticks, 1008);
+        for _ in 0..2 {
+            assert!(disp.dispatch_dialog(true, 0x185, &mut cpu, &mut bus).unwrap().is_ok());
+        }
+        assert!(disp.dialog_tracking.is_none(), "8 ticks: the alert returns");
+        assert_eq!(bus.read_word(TEST_SP + 6), 1);
+        disp.push_key_up(0x24, b'\r');
+
+        // A click on OK, already released when read: returned on the next
+        // pass, the clock standing still.
+        start(&mut disp, &mut cpu, &mut bus);
+        disp.event_queue.clear();
+        let (top, left, _, _) = disp.dialog_tracking.as_ref().unwrap().bounds;
+        let ok = (top + 80, left + 260);
+        disp.push_mouse_down(ok.0, ok.1);
+        disp.push_mouse_up(ok.0, ok.1);
+        disp.input_state.set_mouse_button_for_test(false);
+        disp.input_state.set_mouse_position_for_test(ok);
+        for _ in 0..4 {
+            assert!(disp.dispatch_dialog(true, 0x185, &mut cpu, &mut bus).unwrap().is_ok());
+            if disp.dialog_tracking.is_none() {
+                break;
+            }
+        }
+        assert!(disp.dialog_tracking.is_none(), "a click returns without a flash");
+        assert_eq!(bus.read_word(TEST_SP + 6), 1);
+    }
+
     #[test]
     fn one_button_alert_remains_modal_until_default_button_is_accepted() {
         // Inside Macintosh Volume I, I-417: Alert displays the alert and
@@ -814,6 +883,9 @@
 
         disp.push_key_down(0x24, b'\r');
         for _ in 0..4 {
+            // Return flashes the default button for 8 ticks before the alert ends.
+            let ticks = bus.read_long(crate::memory::globals::addr::TICKS);
+            bus.write_long(crate::memory::globals::addr::TICKS, ticks + 9);
             let result = disp.dispatch_dialog(true, 0x185, &mut cpu, &mut bus);
             assert!(result.unwrap().is_ok());
             if disp.dialog_tracking.is_none() {
@@ -7496,7 +7568,10 @@
                 .unwrap()
                 .unwrap();
             disp.push_key_down(0x24, b'\r');
-            for _ in 0..4 {
+            for _ in 0..8 {
+                // Return flashes the default button for 8 ticks before the alert ends.
+                let ticks = bus.read_long(crate::memory::globals::addr::TICKS);
+                bus.write_long(crate::memory::globals::addr::TICKS, ticks + 9);
                 disp.dispatch_dialog(true, trap_word, &mut cpu, &mut bus)
                     .unwrap()
                     .unwrap();

@@ -4180,14 +4180,17 @@ impl super::TrapDispatcher {
             .as_ref()
             .is_some_and(|tracking| tracking.flash_remaining > 0)
         {
+            // The flash counts ticks, not passes (many a tick).
+            let tick = bus.read_long(crate::memory::globals::addr::TICKS);
             let (remaining, button_draw, finished_hit) = {
                 let t = self.dialog_tracking.as_mut().unwrap();
-                if t.flash_delay > 0 {
-                    t.flash_delay -= 1;
+                let since = *self.dialog_flash_tick.get_or_insert(tick);
+                if tick.wrapping_sub(since) < u32::from(t.flash_delay) {
                     return;
                 }
+                self.dialog_flash_tick = Some(tick);
                 t.flash_remaining -= 1;
-                t.flash_delay = 3;
+                t.flash_delay = 0;
                 let remaining = t.flash_remaining;
                 let flash_item = t.flash_item;
                 let button_draw =
@@ -4326,7 +4329,22 @@ impl super::TrapDispatcher {
                     )
                 })
                 .unwrap_or(0);
-                if hit > 0 {
+                // The button flashes first, as in a dialog
+                // (`start_dialog_button_key_flash`).
+                let button = self.dialog_tracking.as_ref().and_then(|tracking| {
+                    let item = tracking.items.get(hit.checked_sub(1)? as usize)?;
+                    (dialog_item_base_type(item.item_type) == DIALOG_ITEM_BUTTON).then(|| {
+                        (
+                            Self::dialog_item_screen_rect(tracking.bounds, item.rect),
+                            item.text.clone(),
+                            hit == tracking.default_item,
+                        )
+                    })
+                });
+                if let Some((rect, title, is_default)) = button {
+                    self.draw_dialog_button_highlight_state(bus, rect, &title, is_default, true);
+                    self.start_dialog_button_key_flash(hit);
+                } else if hit > 0 {
                     self.finish_interactive_alert(cpu, bus, hit);
                 }
             }
@@ -10532,9 +10550,28 @@ impl super::TrapDispatcher {
             let screen_rect = Self::dialog_item_screen_rect(bounds, rect);
             self.draw_dialog_button_highlight_state(bus, screen_rect, title, is_default, true);
         }
+        // A click acts once, with no flash: TrackControl has already shown
+        // the press, and the item is returned on the next pass. Only Return
+        // or Enter flashes the default button (`start_dialog_button_key_flash`).
+        self.dialog_flash_tick = None;
         if let Some(t) = self.dialog_tracking.as_mut() {
-            t.flash_remaining = 6;
-            t.flash_delay = 3;
+            t.flash_remaining = 1;
+            t.flash_delay = 0;
+            t.flash_item = item_no;
+        }
+    }
+
+    /// Return or Enter (or the cancel keys) flash the button once, inverted
+    /// for about 8 ticks as the Dialog Manager's standard filter does, then
+    /// the item is returned (`flash_remaining` 2: inverted for `flash_delay`
+    /// ticks, then drawn normal and returned).
+    const DIALOG_KEY_FLASH_TICKS: u8 = 8;
+
+    pub(crate) fn start_dialog_button_key_flash(&mut self, item_no: i16) {
+        self.dialog_flash_tick = None;
+        if let Some(t) = self.dialog_tracking.as_mut() {
+            t.flash_remaining = 2;
+            t.flash_delay = Self::DIALOG_KEY_FLASH_TICKS;
             t.flash_item = item_no;
         }
     }
@@ -12558,14 +12595,17 @@ impl super::TrapDispatcher {
                         let outlines_default = self.dialog_outlines_default_button(
                             self.dialog_tracking.as_ref().unwrap().dialog_ptr,
                         );
+                        // The flash counts ticks, not passes (many a tick).
+                        let tick = bus.read_long(crate::memory::globals::addr::TICKS);
                         let (remaining, button_draw) = {
                             let t = self.dialog_tracking.as_mut().unwrap();
-                            if t.flash_delay > 0 {
-                                t.flash_delay -= 1;
+                            let since = *self.dialog_flash_tick.get_or_insert(tick);
+                            if tick.wrapping_sub(since) < u32::from(t.flash_delay) {
                                 return Some(Ok(()));
                             }
+                            self.dialog_flash_tick = Some(tick);
                             t.flash_remaining -= 1;
-                            t.flash_delay = 3;
+                            t.flash_delay = 0;
                             let remaining = t.flash_remaining;
                             let button_draw = if remaining > 0
                                 && flash_item > 0
@@ -13076,10 +13116,7 @@ impl super::TrapDispatcher {
                                                 is_default,
                                                 true,
                                             );
-                                            let t = self.dialog_tracking.as_mut().unwrap();
-                                            t.flash_remaining = 6;
-                                            t.flash_delay = 3;
-                                            t.flash_item = def;
+                                            self.start_dialog_button_key_flash(def);
                                         }
                                     }
                                     crate::dialog_manager::DialogFilterDecision::TriggerCancelButton => {
@@ -13116,10 +13153,7 @@ impl super::TrapDispatcher {
                                                 is_default,
                                                 true,
                                             );
-                                            let t = self.dialog_tracking.as_mut().unwrap();
-                                            t.flash_remaining = 6;
-                                            t.flash_delay = 3;
-                                            t.flash_item = cancel;
+                                            self.start_dialog_button_key_flash(cancel);
                                         }
                                     }
                                     crate::dialog_manager::DialogFilterDecision::AdvanceEditTextFocus => {

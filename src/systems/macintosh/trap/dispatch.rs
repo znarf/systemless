@@ -2259,6 +2259,9 @@ pub struct TrapDispatcher {
     pub(crate) vbl_tasks: crate::process_context::SharedProcessVblTasks,
     /// Active dialog tracking state (non-None while ModalDialog is tracking input)
     pub dialog_tracking: Option<DialogTrackingState>,
+    /// The Ticks of a dialog button flash's last step (its `flash_delay`
+    /// counts ticks from it).
+    pub(crate) dialog_flash_tick: Option<u32>,
     pub(crate) suspended_modal_dialogs: Vec<DialogTrackingState>,
     /// Active Standard File Package save dialog tracking state.
     pub(crate) standard_file_put_tracking: Option<StandardFilePutTrackingState>,
@@ -4136,6 +4139,7 @@ impl TrapDispatcher {
             sleep_queue: Vec::new(),
             vbl_tasks: Default::default(),
             dialog_tracking: None,
+            dialog_flash_tick: None,
             suspended_modal_dialogs: Vec::new(),
             standard_file_put_tracking: None,
             standard_file_drawn: None,
