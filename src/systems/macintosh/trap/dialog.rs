@@ -10366,7 +10366,7 @@ impl super::TrapDispatcher {
         }
     }
 
-    fn consume_dialog_mouse_up(&mut self) -> bool {
+    pub(crate) fn consume_dialog_mouse_up(&mut self) -> bool {
         let next_mouse_event = self
             .event_queue
             .iter()

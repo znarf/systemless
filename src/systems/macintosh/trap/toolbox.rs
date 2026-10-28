@@ -18,7 +18,7 @@ use super::dispatch::{
     raw_trap_route, selector_operation_route, AeCoercionHandler, AeDescriptor, AeObjectAccessor,
     AePrivateHashTable, AeResolveLevel, AeResolveState, DialogItem, EventProbeResult,
     EventRecordSnapshot, MovieState, OsRoutineVariant, SelectorOperationRoute,
-    StandardFileGetEntry, StandardFileGetTrackingState, StandardFilePutTrackingState,
+    StandardFileGetEntry, StandardFileGetTrackingState, StandardFilePressedButton, StandardFilePutTrackingState,
     SyntheticAppleEvent,
 };
 use super::types::{decode_mac_roman, encode_mac_roman_lossy, Rect, ShapeOp};
@@ -2495,10 +2495,53 @@ impl super::TrapDispatcher {
     ) {
         let mut action = None;
         let mut consumed_event = false;
-        while let Some(event) = self.event_queue.pop_front() {
+        let mut released = false;
+        // Startside's patch: a button held down is followed until the mouse button comes up, and acts only if
+        // released inside (it acted at the mouse-down, never drawn pressed).
+        if self.standard_file_pressed.is_some() {
+            match self.track_standard_file_pressed_button(bus, tracking.bounds) {
+                None => {
+                    self.standard_file_get_tracking = Some(tracking);
+                    return;
+                }
+                Some(released_inside) => {
+                    consumed_event = true;
+                    released = true;
+                    if let Some((v, h)) = released_inside {
+                        action = Self::standard_file_get_mouse_action(&mut tracking, v, h);
+                    }
+                }
+            }
+        }
+        while !released {
+            let Some(event) = self.event_queue.pop_front() else {
+                break;
+            };
             consumed_event = true;
             match event.what {
                 1 => {
+                    if let Some((rect, title, is_default)) =
+                        Self::standard_file_get_button_at(&tracking, event.where_v, event.where_h)
+                    {
+                        match self.press_standard_file_button(
+                            bus,
+                            tracking.bounds,
+                            (event.where_v, event.where_h),
+                            rect,
+                            title,
+                            is_default,
+                        ) {
+                            None => {
+                                self.standard_file_get_tracking = Some(tracking);
+                                return;
+                            }
+                            Some(Some((v, h))) => {
+                                action = Self::standard_file_get_mouse_action(&mut tracking, v, h);
+                            }
+                            Some(None) => {}
+                        }
+                        break;
+                    }
                     action = Self::standard_file_get_mouse_action(
                         &mut tracking,
                         event.where_v,
@@ -2654,6 +2697,122 @@ impl super::TrapDispatcher {
             }
         }
         None
+    }
+
+    /// Startside's patch: the enabled Open dialog button under a global point: its local rect, title, and whether
+    /// it is the default button.
+    fn standard_file_get_button_at(
+        tracking: &StandardFileGetTrackingState,
+        v: i16,
+        h: i16,
+    ) -> Option<((i16, i16, i16, i16), &'static str, bool)> {
+        let (top, left, _, _) = tracking.bounds;
+        let (local_v, local_h) = (v - top, h - left);
+        let open_enabled = tracking
+            .entries
+            .get(tracking.selected)
+            .is_some_and(|entry| entry.is_directory || entry.file_type != 0);
+        [
+            (STANDARD_FILE_GET_OPEN_RECT, "Open", true, open_enabled),
+            (STANDARD_FILE_GET_CANCEL_RECT, "Cancel", false, true),
+            (STANDARD_FILE_GET_DESKTOP_RECT, "Desktop", false, true),
+        ]
+        .into_iter()
+        .find(|&(rect, _, _, enabled)| {
+            enabled && Self::standard_file_point_in_rect(local_v, local_h, rect)
+        })
+        .map(|(rect, title, is_default, _)| (rect, title, is_default))
+    }
+
+    /// Startside's patch: the enabled Save dialog button under a global point (Save only where it can write).
+    fn standard_file_put_button_at(
+        &self,
+        tracking: &StandardFilePutTrackingState,
+        v: i16,
+        h: i16,
+    ) -> Option<((i16, i16, i16, i16), &'static str, bool)> {
+        let (top, left, _, _) = tracking.bounds;
+        let (local_v, local_h) = (v - top, h - left);
+        let (_, _, _, writable) = self.standard_file_put_directory_location(tracking.current_dir_id);
+        [
+            (STANDARD_FILE_SAVE_RECT, "Save", true, writable),
+            (STANDARD_FILE_CANCEL_RECT, "Cancel", false, true),
+            (STANDARD_FILE_PUT_DESKTOP_RECT, "Desktop", false, true),
+        ]
+        .into_iter()
+        .find(|&(rect, _, _, enabled)| {
+            enabled && Self::standard_file_point_in_rect(local_v, local_h, rect)
+        })
+        .map(|(rect, title, is_default, _)| (rect, title, is_default))
+    }
+
+    /// Startside's patch: a mouse-down on a Standard File button starts tracking it (IM I-323, TrackControl with
+    /// inButton). Returns as `track_standard_file_pressed_button` does.
+    fn press_standard_file_button(
+        &mut self,
+        bus: &mut MacMemoryBus,
+        bounds: (i16, i16, i16, i16),
+        press: (i16, i16),
+        rect: (i16, i16, i16, i16),
+        title: &'static str,
+        is_default: bool,
+    ) -> Option<Option<(i16, i16)>> {
+        if !self.input_state.mouse_button_pressed() {
+            // Already up when the mouse-down is read (a quick click): the release is where its mouse-up says, or
+            // at the press when none is queued.
+            let release = self
+                .event_queue
+                .iter()
+                .position(|event| matches!(event.what, 1 | 2))
+                .filter(|&index| self.event_queue.get(index).is_some_and(|event| event.what == 2))
+                .and_then(|index| self.event_queue.remove(index))
+                .map_or(press, |event| (event.where_v, event.where_h));
+            let (top, left, bottom, right) = Self::dialog_item_screen_rect(bounds, rect);
+            let inside = release.0 >= top && release.0 < bottom && release.1 >= left && release.1 < right;
+            return Some(inside.then_some(press));
+        }
+        self.standard_file_pressed = Some(StandardFilePressedButton {
+            press,
+            rect,
+            title,
+            is_default,
+            highlighted: false,
+        });
+        self.track_standard_file_pressed_button(bus, bounds)
+    }
+
+    /// Startside's patch: one pass of a held Standard File button. While the mouse button is down the button is
+    /// drawn inverted when the pointer is inside it and normal when outside, and `None` is returned. Once it is up,
+    /// its mouse-up is taken and `Some(Some(press))` says it was released inside (the click to act on, at the
+    /// press), `Some(None)` outside (nothing happens; the caller redraws the dialog).
+    fn track_standard_file_pressed_button(
+        &mut self,
+        bus: &mut MacMemoryBus,
+        bounds: (i16, i16, i16, i16),
+    ) -> Option<Option<(i16, i16)>> {
+        let pressed = self.standard_file_pressed.clone()?;
+        let screen_rect = Self::dialog_item_screen_rect(bounds, pressed.rect);
+        let (mouse_v, mouse_h) = self.input_state.mouse_position();
+        let (top, left, bottom, right) = screen_rect;
+        let inside = mouse_v >= top && mouse_v < bottom && mouse_h >= left && mouse_h < right;
+        if self.input_state.mouse_button_pressed() {
+            if inside != pressed.highlighted {
+                self.draw_dialog_button_highlight_state(
+                    bus,
+                    screen_rect,
+                    pressed.title,
+                    pressed.is_default,
+                    inside,
+                );
+                if let Some(pressed) = self.standard_file_pressed.as_mut() {
+                    pressed.highlighted = inside;
+                }
+            }
+            return None;
+        }
+        self.standard_file_pressed = None;
+        self.consume_dialog_mouse_up();
+        Some(inside.then_some(pressed.press))
     }
 
     fn standard_file_get_key_action(
@@ -3108,10 +3267,52 @@ impl super::TrapDispatcher {
     ) {
         let mut action = None;
         let mut consumed_event = false;
-        while let Some(event) = self.event_queue.pop_front() {
+        let mut released = false;
+        // Startside's patch: a button held down is followed until the mouse button comes up (as the Open dialog).
+        if self.standard_file_pressed.is_some() {
+            match self.track_standard_file_pressed_button(bus, tracking.bounds) {
+                None => {
+                    self.standard_file_put_tracking = Some(tracking);
+                    return;
+                }
+                Some(released_inside) => {
+                    consumed_event = true;
+                    released = true;
+                    if let Some((v, h)) = released_inside {
+                        action = self.standard_file_put_mouse_action(&mut tracking, v, h);
+                    }
+                }
+            }
+        }
+        while !released {
+            let Some(event) = self.event_queue.pop_front() else {
+                break;
+            };
             consumed_event = true;
             match event.what {
                 1 => {
+                    if let Some((rect, title, is_default)) =
+                        self.standard_file_put_button_at(&tracking, event.where_v, event.where_h)
+                    {
+                        match self.press_standard_file_button(
+                            bus,
+                            tracking.bounds,
+                            (event.where_v, event.where_h),
+                            rect,
+                            title,
+                            is_default,
+                        ) {
+                            None => {
+                                self.standard_file_put_tracking = Some(tracking);
+                                return;
+                            }
+                            Some(Some((v, h))) => {
+                                action = self.standard_file_put_mouse_action(&mut tracking, v, h);
+                            }
+                            Some(None) => {}
+                        }
+                        break;
+                    }
                     action = self.standard_file_put_mouse_action(
                         &mut tracking,
                         event.where_v,
