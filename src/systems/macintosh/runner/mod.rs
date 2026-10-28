@@ -2015,9 +2015,7 @@ impl FixtureRunner {
             crate::memory::globals::DEFAULT_MENU_FLASH_COUNT,
         );
         let profile = crate::machine_profile::reference_machine_profile();
-        let visible_row_bytes =
-            (u32::from(profile.screen_width) * u32::from(config.screen_depth)).div_ceil(8);
-        let row_bytes = (visible_row_bytes / 16 + 1) * 16;
+        let row_bytes = profile.screen_row_bytes_at_depth(config.screen_depth);
         dispatcher.screen_mode = (
             bus.read_long(crate::memory::globals::addr::SCRN_BASE),
             row_bytes,

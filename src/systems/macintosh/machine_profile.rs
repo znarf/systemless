@@ -167,8 +167,14 @@ impl MachineProfile {
     }
 
     /// Bytes per scanline for this profile's screen width at `depth`, padded
-    /// the same way as [`Self::screen_row_bytes`].
+    /// the same way as [`Self::screen_row_bytes`], except the compact
+    /// Macintosh's built-in 512-pixel 1-bit screen, which has exactly 64
+    /// bytes a row (its 21,888-byte screen buffer, Inside Macintosh Volume
+    /// III): software that draws straight into it counts on that.
     pub const fn screen_row_bytes_at_depth(self, depth: u16) -> u32 {
+        if self.screen_width == 512 && depth == 1 {
+            return 64;
+        }
         let bytes = (self.screen_width as u32 * depth as u32).div_ceil(8);
         (bytes / 16 + 1) * 16
     }
@@ -260,6 +266,17 @@ fn resolve_reference_machine_profile() -> MachineProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_macintosh_screen_has_64_byte_rows() {
+        let compact = MachineProfile {
+            screen_width: 512,
+            ..REFERENCE_MACHINE_PROFILE
+        };
+        assert_eq!(compact.screen_row_bytes_at_depth(1), 64);
+        assert_eq!(compact.screen_row_bytes_at_depth(8), 528);
+        assert_eq!(REFERENCE_MACHINE_PROFILE.screen_row_bytes_at_depth(1), 112);
+    }
 
     #[test]
     fn m68k_capabilities_derive_from_machine_profile_fields() {
