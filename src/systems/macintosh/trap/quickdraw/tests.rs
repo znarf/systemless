@@ -1,4 +1,4 @@
-    use super::super::test_helpers::{setup, setup_with_port, TEST_SP};
+    use super::super::test_helpers::{setup, setup_with_port, MockCpu, TEST_SP};
     use crate::cpu::{CpuOps, Register};
     use crate::display::CursorImage;
     use crate::memory::bus::SharedRamRegion;
@@ -4694,6 +4694,104 @@
                 assert_eq!(pixel(y, x), horizontal || vertical, "pixel ({x}, {y})");
             }
         }
+    }
+
+    // Startside's patch: OpenRgn hides the pen and CloseRgn shows it (IM I-181), so a line recorded after ShowPen
+    // is drawn too: MacPaint's lasso calls OpenRgn, ShowPen, then LineTo to the mouse, and showed no outline.
+    fn line_to_trap(d: &mut TrapDispatcher, cpu: &mut MockCpu, bus: &mut MacMemoryBus, v: i16, h: i16) {
+        let sp = cpu.read_reg(Register::A7);
+        bus.write_word(sp, v as u16);
+        bus.write_word(sp + 2, h as u16);
+        assert!(d.dispatch_quickdraw(true, 0x091, cpu, bus).unwrap().is_ok());
+        cpu.write_reg(Register::A7, sp);
+    }
+
+    fn close_rgn_trap(d: &mut TrapDispatcher, cpu: &mut MockCpu, bus: &mut MacMemoryBus) -> u32 {
+        let ptr = bus.alloc(10);
+        bus.write_word(ptr, 10);
+        let handle = bus.alloc(4);
+        bus.write_long(handle, ptr);
+        let sp = cpu.read_reg(Register::A7);
+        bus.write_long(sp, handle);
+        assert!(d.dispatch_quickdraw(true, 0x0DB, cpu, bus).unwrap().is_ok());
+        cpu.write_reg(Register::A7, sp);
+        handle
+    }
+
+    fn lasso_screen(d: &mut TrapDispatcher) -> (u32, u32) {
+        let (screen_base, _, _, _, _) = d.screen_mode;
+        d.set_screen_mode_for_test(screen_base, 64, 512, 342, 1);
+        d.pn_size = (1, 1);
+        d.pn_pat = [0xff; 8];
+        d.pn_mode = 8; // patCopy
+        (screen_base, 64)
+    }
+
+    #[test]
+    fn open_rgn_hides_the_pen_and_close_rgn_shows_it() {
+        let (mut d, mut cpu, mut bus) = setup_with_port();
+        let port_ptr = 0x181000u32;
+        d.set_current_port_state(&mut bus, &mut cpu, port_ptr, None);
+        let (screen_base, row_bytes) = lasso_screen(&mut d);
+
+        assert!(d.dispatch_quickdraw(true, 0x0DA, &mut cpu, &mut bus).unwrap().is_ok());
+        assert_eq!(d.pn_vis, -1);
+        assert_eq!(bus.read_word(port_ptr + 66) as i16, -1);
+        d.pn_loc = (20, 20);
+        line_to_trap(&mut d, &mut cpu, &mut bus, 20, 60);
+        line_to_trap(&mut d, &mut cpu, &mut bus, 50, 60);
+        line_to_trap(&mut d, &mut cpu, &mut bus, 50, 20);
+        line_to_trap(&mut d, &mut cpu, &mut bus, 20, 20);
+        let rgn = close_rgn_trap(&mut d, &mut cpu, &mut bus);
+        assert_eq!(d.pn_vis, 0);
+        assert_eq!(bus.read_word(port_ptr + 66) as i16, 0);
+
+        // Recorded, not drawn.
+        let ptr = bus.read_long(rgn);
+        let bbox: Vec<i16> = (0..4).map(|i| bus.read_word(ptr + 2 + i * 2) as i16).collect();
+        assert_eq!(bbox, [20, 20, 50, 60]);
+        for y in 15..60u32 {
+            for x in 15..70u32 {
+                assert_eq!(bus.read_byte(screen_base + y * row_bytes + x / 8) & (0x80 >> (x % 8)), 0, "pixel ({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn a_line_recorded_after_show_pen_is_drawn_too() {
+        let (mut d, mut cpu, mut bus) = setup_with_port();
+        let port_ptr = 0x181000u32;
+        d.set_current_port_state(&mut bus, &mut cpu, port_ptr, None);
+        let (screen_base, row_bytes) = lasso_screen(&mut d);
+
+        // As MacPaint's GetRgn: OpenRgn, ShowPen, lines to the mouse, HidePen, CloseRgn.
+        assert!(d.dispatch_quickdraw(true, 0x0DA, &mut cpu, &mut bus).unwrap().is_ok());
+        assert!(d.dispatch_quickdraw(true, 0x097, &mut cpu, &mut bus).unwrap().is_ok());
+        assert_eq!(d.pn_vis, 0);
+        d.pn_loc = (20, 20);
+        line_to_trap(&mut d, &mut cpu, &mut bus, 20, 60);
+        line_to_trap(&mut d, &mut cpu, &mut bus, 50, 60);
+        line_to_trap(&mut d, &mut cpu, &mut bus, 50, 20);
+        line_to_trap(&mut d, &mut cpu, &mut bus, 20, 20);
+        assert!(d.dispatch_quickdraw(true, 0x096, &mut cpu, &mut bus).unwrap().is_ok());
+        let rgn = close_rgn_trap(&mut d, &mut cpu, &mut bus);
+        assert_eq!(d.pn_vis, 0);
+
+        let pixel = |bus: &MacMemoryBus, y: u32, x: u32| bus.read_byte(screen_base + y * row_bytes + x / 8) & (0x80 >> (x % 8)) != 0;
+        for x in 20..=60u32 {
+            assert!(pixel(&bus, 20, x), "top edge pixel ({x}, 20)");
+        }
+        for y in 20..=50u32 {
+            assert!(pixel(&bus, y, 60), "right edge pixel (60, {y})");
+        }
+        for x in 20..=60u32 {
+            assert!(pixel(&bus, 50, x), "bottom edge pixel ({x}, 50)");
+        }
+        assert!(!pixel(&bus, 35, 40), "inside the outline stays white");
+        // And recorded: the region's bounds are the outline's.
+        let ptr = bus.read_long(rgn);
+        let bbox: Vec<i16> = (0..4).map(|i| bus.read_word(ptr + 2 + i * 2) as i16).collect();
+        assert_eq!(bbox, [20, 20, 50, 60]);
     }
 
     #[test]

@@ -1810,9 +1810,11 @@ impl super::TrapDispatcher {
                         }
                         rec.vertices.push((v, h));
                     }
-                } else if self.record_region_line(v0, h0, v, h) {
+                } else if self.record_region_line(v0, h0, v, h) && self.pn_vis < 0 {
                     // OpenRgn records the mathematical line outline and
                     // suppresses framebuffer writes.
+                    // Startside's patch: the line is drawn too when the pen is visible (OpenRgn hides it, IM I-181; an
+                    // application calling ShowPen after OpenRgn draws what it records). MacPaint's lasso does: no outline.
                 } else if let Err(e) = self.draw_line(cpu, bus, h0, v0, h, v) {
                     return Some(Err(e));
                 }
@@ -1839,8 +1841,8 @@ impl super::TrapDispatcher {
                         }
                         rec.vertices.push((v1, h1));
                     }
-                } else if self.record_region_line(v0, h0, v1, h1) {
-                    // See LineTo above for OpenRgn-recording rationale.
+                } else if self.record_region_line(v0, h0, v1, h1) && self.pn_vis < 0 {
+                    // See LineTo above for OpenRgn-recording rationale (and Startside's patch: drawn when visible).
                 } else if let Err(e) = self.draw_line(cpu, bus, h0, v0, h1, v1) {
                     return Some(Err(e));
                 }
@@ -10605,6 +10607,10 @@ impl super::TrapDispatcher {
             // OpenRgn ($A8DA): Begins region recording; subsequent drawing primitives skip framebuffer writes
             (true, 0x0DA) => {
                 self.recording_region = Some(super::dispatch::RegionRecording::default());
+                // Startside's patch: OpenRgn calls HidePen and CloseRgn ShowPen (IM I-181), so that an application
+                // may ShowPen in between and see the outline it records (MacPaint's lasso, GetRgn).
+                self.pn_vis -= 1;
+                self.sync_current_port_draw_state(bus);
                 Ok(())
             }
 
@@ -10618,6 +10624,11 @@ impl super::TrapDispatcher {
                 let sp = cpu.read_reg(Register::A7);
                 let dst_handle = bus.read_long(sp);
                 cpu.write_reg(Register::A7, sp + 4);
+                // Startside's patch: the ShowPen balancing OpenRgn's HidePen (IM I-181).
+                if self.recording_region.is_some() {
+                    self.pn_vis += 1;
+                    self.sync_current_port_draw_state(bus);
+                }
                 if let Some(recording) = self.recording_region.take() {
                     if dst_handle != 0 {
                         if let Some((rows_top, rows)) = Self::recorded_region_rows(&recording) {
