@@ -6958,7 +6958,21 @@ impl super::TrapDispatcher {
         // redrawing live standard controls so retained composition cannot
         // drop the aDefItem outline.
         let auto_default_outline = true;
-        for (i, item) in items.iter().enumerate() {
+        // Redraw text items, which erase their rects, before controls, as
+        // DrawDialog draws controls after the other items (IM:I I-418):
+        // static text whose rect runs under a button or an icon must not
+        // erase it.
+        let is_control = |item: &DialogItem| {
+            matches!(
+                dialog_item_base_type(item.item_type),
+                DIALOG_ITEM_BUTTON..=DIALOG_ITEM_RESOURCE_CONTROL
+            )
+        };
+        let order = (0..items.len())
+            .filter(|&i| !is_control(&items[i]))
+            .chain((0..items.len()).filter(|&i| is_control(&items[i])));
+        for i in order {
+            let item = &items[i];
             let item_num = (i + 1) as i16;
             if only_item.is_some_and(|only| item_num != only) {
                 continue;
@@ -7216,6 +7230,14 @@ impl super::TrapDispatcher {
                         false,
                         enabled,
                     );
+                }
+                DIALOG_ITEM_ICON if item.resource_id != 0 => {
+                    // Loaded when the dialog was first drawn.
+                    if let Some((_, icon_ptr)) =
+                        self.find_loaded_resource_any(*b"ICON", item.resource_id)
+                    {
+                        self.draw_icon(bus, abs_top, abs_left, abs_bottom, abs_right, icon_ptr);
+                    }
                 }
                 _ => {}
             }

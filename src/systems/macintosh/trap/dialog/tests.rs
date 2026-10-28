@@ -9463,6 +9463,38 @@
     }
 
     #[test]
+    fn retained_redraw_draws_buttons_over_overlapping_static_text() {
+        // DrawDialog draws controls after the other items (IM:I I-418), so a
+        // statText rect running under a button doesn't erase it.
+        let screen_base = 0x300000u32;
+        let row_bytes = 64u32;
+        let bounds = (40, 40, 120, 220);
+        let dialog_ptr = 0x2000;
+        let items = vec![
+            DialogItem {
+                item_type: 4,
+                rect: (20, 20, 40, 100),
+                text: "OK".to_string(),
+                ..Default::default()
+            },
+            DialogItem {
+                item_type: 0x88,
+                rect: (24, 0, 40, 170),
+                text: "x".to_string(),
+                ..Default::default()
+            },
+        ];
+        let (mut disp, _cpu, mut bus) = setup();
+        disp.set_screen_mode_for_test(screen_base, row_bytes, 512, 342, 1);
+
+        disp.redraw_standard_dialog_items(&mut bus, bounds, &items, 0, "", 0, dialog_ptr, None);
+        assert!(
+            screen_pixel_is_set(&bus, screen_base, row_bytes, 60, 70),
+            "the button's left edge, inside the statText's rect"
+        );
+    }
+
+    #[test]
     fn draw_dialog_honors_live_standard_control_visibility() {
         // HideControl sets contrlVis to zero and DrawDialog redraws the
         // dialog's controls through the Control Manager (IM:I I-329/I-417).
