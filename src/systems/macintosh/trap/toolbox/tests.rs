@@ -12774,6 +12774,85 @@ fn sf_get_file_gui_tracking_opens_selected_pilots_file_with_wdrefnum() {
     assert_eq!(cpu.read_reg(Register::D0), 0);
 }
 
+// Standard File's buttons are tracked as TrackControl does (IM:I I-323):
+// Cancel held down is drawn pressed while the pointer is inside it, and
+// cancels only when the button comes up inside it.
+#[test]
+fn sf_get_file_gui_cancel_acts_only_when_released_inside() {
+    let _env = clear_standard_file_env();
+    let (mut disp, mut cpu, mut bus) = setup();
+    let screen_base = bus.alloc(800 * 600);
+    disp.set_screen_mode_for_test(screen_base, 800, 800, 600, 8);
+    let sp = TEST_SP;
+    let reply_ptr = 0x320D00u32;
+    let type_list_ptr = 0x320E00u32;
+    disp.yield_for_ui = true;
+    bus.write_byte(reply_ptr, 0xFF);
+    bus.write_long(type_list_ptr, u32::from_be_bytes(*b"PIL "));
+    bus.write_word(sp, 0x0002); // SFGetFile selector
+    bus.write_long(sp + 2, reply_ptr); // VAR reply
+    bus.write_long(sp + 10, type_list_ptr); // typeList
+    bus.write_word(sp + 14, 1); // numTypes
+    bus.write_long(sp + 16, 0); // fileFilter
+    bus.write_long(sp + 20, 0); // prompt
+    bus.write_word(sp + 24, 84); // where.v
+    bus.write_word(sp + 26, 222); // where.h
+
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert_eq!(disp.standard_file_get_tracking.as_ref().unwrap().bounds, (84, 222, 262, 578));
+    // Cancel, (110, 258, 131, 338) in the dialog, is (194, 480, 215, 560) on the screen.
+    let inside = (200i16, 500i16);
+    let outside = (300i16, 300i16);
+    let event = |what: u16, (v, h): (i16, i16)| QueuedEvent {
+        what,
+        message: 0,
+        when: 0,
+        where_v: v,
+        where_h: h,
+        modifiers: 0,
+    };
+    let pressed = |disp: &TrapDispatcher| {
+        disp.standard_file_pressed
+            .as_ref()
+            .map(|button| button.highlighted)
+    };
+
+    disp.input_state.set_mouse_button_for_test(true);
+    disp.input_state.set_mouse_position_for_test(inside);
+    disp.event_queue.push_back(event(1, inside));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert!(disp.is_standard_file_get_tracking(), "a press does not cancel");
+    assert_eq!(pressed(&disp), Some(true));
+
+    disp.input_state.set_mouse_position_for_test(outside);
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert_eq!(pressed(&disp), Some(false), "dragged off, Cancel is drawn at rest");
+
+    disp.input_state.set_mouse_button_for_test(false);
+    disp.event_queue.push_back(event(2, outside));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert!(disp.is_standard_file_get_tracking(), "released outside, the dialog stays");
+    assert_eq!(pressed(&disp), None);
+    assert!(disp.event_queue.iter().all(|event| event.what != 2), "its mouse-up is taken");
+
+    // A quick click, already up when its mouse-down is read, goes by where its mouse-up was.
+    disp.event_queue.push_back(event(1, inside));
+    disp.event_queue.push_back(event(2, outside));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert!(disp.is_standard_file_get_tracking());
+
+    disp.input_state.set_mouse_button_for_test(true);
+    disp.input_state.set_mouse_position_for_test(inside);
+    disp.event_queue.push_back(event(1, inside));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    disp.input_state.set_mouse_button_for_test(false);
+    disp.event_queue.push_back(event(2, inside));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert!(!disp.is_standard_file_get_tracking(), "released inside, Cancel cancels");
+    assert_eq!(bus.read_byte(reply_ptr), 0);
+    assert_eq!(cpu.read_reg(Register::A7), sp + 28);
+}
+
 // Pack3 / Standard File ($A9EA) — StandardPutFile selector $0005
 // Non-interactive runtimes accept the default filename in the current dir.
 #[test]

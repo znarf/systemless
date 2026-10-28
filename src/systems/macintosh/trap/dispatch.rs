@@ -772,6 +772,18 @@ pub(crate) struct StandardFilePutTrackingState {
     pub saved_pixels: SavedPixels,
 }
 
+/// A Standard File button held down (`standard_file_pressed`).
+#[derive(Clone, Debug)]
+pub(crate) struct StandardFilePressedButton {
+    /// Where the mouse went down, global: the click acted on at release.
+    pub press: (i16, i16),
+    /// The button's rect, local to the dialog.
+    pub rect: (i16, i16, i16, i16),
+    pub title: &'static str,
+    pub is_default: bool,
+    pub highlighted: bool,
+}
+
 /// Candidate file shown by a retained Standard File get dialog.
 #[derive(Clone, Debug)]
 pub(crate) struct StandardFileGetEntry {
@@ -2256,6 +2268,11 @@ pub struct TrapDispatcher {
     /// idle pass that consumed no event redraws the dialog only when the
     /// screen under its frame changed since.
     pub(crate) standard_file_drawn: Option<crate::memory::presentation::ScreenMark>,
+    /// The Standard File button held down, tracked until the mouse button
+    /// comes up as TrackControl tracks inButton (IM:I I-323): drawn
+    /// inverted while the pointer is inside it, acting only when released
+    /// inside.
+    pub(crate) standard_file_pressed: Option<StandardFilePressedButton>,
     /// Bounds owned by retained host overlays in an attached CPU adapter.
     /// These surfaces draw directly into the framebuffer without WindowRecords.
     pub(crate) external_host_overlay_rects: Vec<(i16, i16, i16, i16)>,
@@ -4122,6 +4139,7 @@ impl TrapDispatcher {
             suspended_modal_dialogs: Vec::new(),
             standard_file_put_tracking: None,
             standard_file_drawn: None,
+            standard_file_pressed: None,
             standard_file_get_tracking: None,
             external_host_overlay_rects: Vec::new(),
             dialog_items: HashMap::default(),

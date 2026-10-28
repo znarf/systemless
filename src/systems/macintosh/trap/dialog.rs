@@ -8525,7 +8525,7 @@ impl super::TrapDispatcher {
         self.fill_dialog_rect(bus, bottom - 1, left + 3, bottom, right - 3, true);
     }
 
-    fn draw_dialog_button_highlight_state(
+    pub(crate) fn draw_dialog_button_highlight_state(
         &self,
         bus: &mut MacMemoryBus,
         rect: (i16, i16, i16, i16),
@@ -10474,7 +10474,7 @@ impl super::TrapDispatcher {
         }
     }
 
-    fn consume_dialog_mouse_up(&mut self) -> bool {
+    pub(crate) fn consume_dialog_mouse_up(&mut self) -> bool {
         let next_mouse_event = self
             .event_queue
             .iter()
@@ -10496,7 +10496,7 @@ impl super::TrapDispatcher {
             .then(|| mouse_down.clone());
     }
 
-    fn dialog_item_screen_rect(
+    pub(crate) fn dialog_item_screen_rect(
         bounds: (i16, i16, i16, i16),
         rect: (i16, i16, i16, i16),
     ) -> (i16, i16, i16, i16) {
