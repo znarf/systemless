@@ -6266,7 +6266,12 @@ impl super::TrapDispatcher {
         // Draw every visible frame in reverse WindowList order. The shared
         // single-window path applies ClipAbove semantics to each frame.
         // Macintosh Toolbox Essentials (1992), pp. 4-65 and 4-118--4-119.
-        if !skip_chrome && menu_bar_height > 0 {
+        // A Standard File dialog has no WindowRecord yet lies in front of
+        // every window, which can't change while it is up: repainting their
+        // frames would draw them over it.
+        let standard_file_up =
+            self.standard_file_get_tracking.is_some() || self.standard_file_put_tracking.is_some();
+        if !skip_chrome && menu_bar_height > 0 && !standard_file_up {
             let list_snapshot = self.window_list.to_vec();
             for &w in list_snapshot.iter().rev() {
                 // Native PowerPC windows participate in the process-wide
@@ -8862,6 +8867,64 @@ mod redraw_chrome_tests {
             "desktop composition must leave the menu bar to the Menu Manager"
         );
         assert_eq!(screen_w, 800, "test assumes the default 800-wide screen");
+    }
+
+    #[test]
+    fn redraw_chrome_paints_no_window_frame_over_a_standard_file_dialog() {
+        // A Standard File dialog has no WindowRecord but lies in front of
+        // every window: the chrome pass must not draw their frames over it.
+        let (mut disp, mut cpu, mut bus) = super::super::test_helpers::setup();
+        let screen_base = bus.alloc(800 * 600);
+        disp.screen_mode = (screen_base, 800, 800, 600, 8);
+        bus.write_long(crate::memory::globals::addr::SCREEN_BITS, screen_base);
+        bus.write_long(crate::memory::globals::addr::SCRN_BASE, screen_base);
+        bus.write_word(crate::memory::globals::addr::MBAR_HEIGHT, 20);
+        disp.menu_bar_hidden = true;
+        let window_addr = bus.alloc(256);
+        disp.init_cgraf_window(
+            &mut bus,
+            &mut cpu,
+            window_addr,
+            screen_base,
+            60,
+            30,
+            220,
+            370,
+            "Document",
+            8,
+            true,
+            true,
+            true,
+            0,
+        );
+        let title_bar_probe = screen_base + 45 * 800 + 50;
+
+        bus.fill_bytes(screen_base, 800 * 600, 0xAA);
+        disp.redraw_chrome(&mut bus);
+        assert_ne!(bus.read_byte(title_bar_probe), 0xAA, "title bar repainted");
+
+        disp.standard_file_put_tracking = Some(StandardFilePutTrackingState {
+            modern_reply: false,
+            reply_ptr: 0,
+            stack_ptr: 0,
+            pop_total: 0,
+            entries: Vec::new(),
+            current_dir_id: 2,
+            selected: None,
+            prompt: String::new(),
+            name: String::new(),
+            sel_start: 0,
+            sel_end: 0,
+            bounds: (30, 20, 290, 380),
+            saved_pixels: SavedPixels::default(),
+        });
+        bus.fill_bytes(screen_base, 800 * 600, 0xAA);
+        disp.redraw_chrome(&mut bus);
+        assert_eq!(
+            bus.read_byte(title_bar_probe),
+            0xAA,
+            "no title bar drawn over the Standard File dialog"
+        );
     }
 
     #[test]
