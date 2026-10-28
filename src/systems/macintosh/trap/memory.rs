@@ -1816,7 +1816,20 @@ impl super::TrapDispatcher {
             // it cannot represent the remaining launch-time growth allowance.
             // $A11D dispatches here via the OS-trap low-byte (0x1D) decode.
             (false, 0x1D) => {
-                let free = free_heap_estimate(bus);
+                // MaxMem is the largest block NewHandle can then allocate
+                // (IM:II II-38), whatever FreeMem's compatibility floor: the
+                // space left above the allocator's bump pointer, below
+                // ApplLimit, or the largest free block, less a block header's
+                // worth of slack.
+                let appl_limit = bus.read_long(addr::APPL_LIMIT);
+                let limit = match appl_limit {
+                    0 => bus.classic_heap_limit(),
+                    _ => bus.classic_heap_limit().min(appl_limit),
+                };
+                let room = limit
+                    .saturating_sub(bus.heap_bump_ptr())
+                    .max(bus.largest_free_heap_block());
+                let free = free_heap_estimate(bus).min(room.saturating_sub(1024) & !3);
                 cpu.write_reg(Register::D0, free);
                 let heap_end = bus.read_long(addr::HEAP_END);
                 let appl_limit = bus.read_long(addr::APPL_LIMIT);

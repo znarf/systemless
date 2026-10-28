@@ -6250,6 +6250,18 @@ impl SharedClassicHeapAllocator {
         self.0.borrow().heap_ptr
     }
 
+    /// The largest free block an allocation could reuse.
+    pub(crate) fn largest_free_block(&self) -> u32 {
+        self.0
+            .borrow()
+            .free_blocks
+            .iter()
+            .filter(|(_, blocks)| !blocks.is_empty())
+            .map(|(&bucket, _)| bucket)
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Adopt a direct-loaded block inside an already reserved application image.
     /// Its bytes stay in place; ordinary handle size, resize and disposal now
     /// operate on the same allocation that the Segment Loader executes.

@@ -2882,9 +2882,13 @@ impl MacMemoryBus {
         self.heap_allocator.allocation_size(addr)
     }
 
-    #[cfg(test)]
     pub(crate) fn heap_bump_ptr(&self) -> u32 {
         self.heap_allocator.heap_bump_ptr()
+    }
+
+    /// The largest free block the classic heap allocator could reuse.
+    pub(crate) fn largest_free_heap_block(&self) -> u32 {
+        self.heap_allocator.largest_free_block()
     }
 
     /// Upper bound used by the classic heap allocator. The framebuffer and
