@@ -18,7 +18,8 @@ use super::dispatch::{
     raw_trap_route, selector_operation_route, AeCoercionHandler, AeDescriptor, AeObjectAccessor,
     AePrivateHashTable, AeResolveLevel, AeResolveState, DialogItem, EventProbeResult,
     EventRecordSnapshot, MovieState, OsRoutineVariant, SelectorOperationRoute,
-    StandardFileGetEntry, StandardFileGetTrackingState, StandardFilePressedButton, StandardFilePutTrackingState,
+    StandardFileGetEntry, StandardFileGetTrackingState, StandardFilePopupMenu, StandardFilePressedButton,
+    StandardFilePutTrackingState,
     SyntheticAppleEvent,
 };
 use super::types::{decode_mac_roman, encode_mac_roman_lossy, Rect, ShapeOp};
@@ -2499,13 +2500,7 @@ impl super::TrapDispatcher {
     ) {
         let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
             self.get_screen_params();
-        let name = Self::standard_file_fit_name(name, 150);
-        let text_width = Self::fb_measure_string(&name, 0, 12);
-        let width = text_width + 45;
-        let top = bounds.0 + row_rect.0;
-        let bottom = bounds.0 + row_rect.2;
-        let left = bounds.1 + (row_rect.1 + row_rect.3) / 2 - width / 2;
-        let right = left + width;
+        let (name, text_width, (top, left, bottom, right)) = Self::standard_file_popup_rect(bounds, row_rect, name);
         let fill = |bus: &mut MacMemoryBus, t: i16, l: i16, b: i16, r: i16, black: bool| {
             Self::fb_fill_rect(bus, screen_base, row_bytes, pixel_size, screen_width, screen_height, t, l, b, r, black);
         };
@@ -2536,6 +2531,149 @@ impl super::TrapDispatcher {
             12,
         );
         self.draw_standard_file_icon(bus, left + 28 + text_width, top + 6, &STANDARD_FILE_POPUP_TRIANGLE, true);
+    }
+
+    /// Startside's patch: the pop-up's box (global) for a name: as wide as the name needs, centred over the list.
+    fn standard_file_popup_rect(
+        bounds: (i16, i16, i16, i16),
+        row_rect: (i16, i16, i16, i16),
+        name: &str,
+    ) -> (String, i16, (i16, i16, i16, i16)) {
+        let name = Self::standard_file_fit_name(name, 150);
+        let text_width = Self::fb_measure_string(&name, 0, 12);
+        let width = text_width + 45;
+        let top = bounds.0 + row_rect.0;
+        let bottom = bounds.0 + row_rect.2;
+        let left = bounds.1 + (row_rect.1 + row_rect.3) / 2 - width / 2;
+        (name, text_width, (top, left, bottom, left + width))
+    }
+
+    /// Startside's patch: the folders a Standard File dialog can go up to from `dir_id`, as System 7.1's pop-up lists
+    /// them: the folder itself, its parents, then the disk.
+    fn standard_file_path_items(&self, dir_id: u32) -> Vec<(String, u32, bool)> {
+        let mut items = Vec::new();
+        let mut dir = dir_id;
+        for _ in 0..64 {
+            let (volume, folder) = self.standard_file_location_names(dir);
+            match folder {
+                Some(name) => {
+                    items.push((name, dir, false));
+                    match self.directory_entry_for_id(dir) {
+                        Some(entry) if entry.parent_dir_id > 1 && entry.parent_dir_id != dir => dir = entry.parent_dir_id,
+                        _ => {
+                            items.push((volume, 2, true));
+                            break;
+                        }
+                    }
+                }
+                None => {
+                    items.push((volume, dir, true));
+                    break;
+                }
+            }
+        }
+        items
+    }
+
+    /// Startside's patch: a press on the folder pop-up (its box at `popup`, global) opens its menu over it, the
+    /// current folder on top, as PopUpMenuSelect does (IM V-241); `track_standard_file_popup` follows it.
+    fn open_standard_file_popup(&mut self, bus: &mut MacMemoryBus, popup: (i16, i16, i16, i16), dir_id: u32) {
+        let items = self.standard_file_path_items(dir_id);
+        let widest = items
+            .iter()
+            .map(|(name, _, _)| Self::fb_measure_string(&Self::standard_file_fit_name(name, 150), 0, 12))
+            .max()
+            .unwrap_or(0);
+        let width = (widest + 40).max(popup.3 - popup.1);
+        let height = items.len() as i16 * STANDARD_FILE_GET_ROW_HEIGHT + 2;
+        let (_, _, screen_width, screen_height, _) = self.screen_mode;
+        let menu_bar = bus.read_word(addr::MBAR_HEIGHT) as i16;
+        let top = popup.0.min(screen_height as i16 - height - 1).max(menu_bar);
+        let left = popup.1.min(screen_width as i16 - width - 1).max(0);
+        let rect = (top, left, top + height, left + width);
+        // Its pixels and its shadow's, put back as it closes.
+        let saved = self.save_screen_area(bus, (top, left, top + height + 1, left + width + 1));
+        self.standard_file_popup = Some(StandardFilePopupMenu { items, rect, highlighted: None, saved });
+        self.draw_standard_file_popup_menu(bus);
+    }
+
+    fn save_screen_area(&self, bus: &MacMemoryBus, rect: (i16, i16, i16, i16)) -> crate::memory::SavedPixels {
+        // `save_dialog_pixels` keeps a dBox frame's margin round its rect: give it the area less that margin.
+        let margin = crate::dialog_manager::DIALOG_DBOX_FRAME_MARGIN;
+        self.save_dialog_pixels(bus, (rect.0 + margin, rect.1 + margin, rect.2 - margin, rect.3 - margin))
+    }
+
+    fn draw_standard_file_popup_menu(&self, bus: &mut MacMemoryBus) {
+        let Some(menu) = self.standard_file_popup.as_ref() else {
+            return;
+        };
+        let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
+            self.get_screen_params();
+        let fill = |bus: &mut MacMemoryBus, t: i16, l: i16, b: i16, r: i16, black: bool| {
+            Self::fb_fill_rect(bus, screen_base, row_bytes, pixel_size, screen_width, screen_height, t, l, b, r, black);
+        };
+        let (top, left, bottom, right) = menu.rect;
+        fill(bus, top, left, bottom, right, false);
+        fill(bus, top, left, top + 1, right, true);
+        fill(bus, bottom - 1, left, bottom, right, true);
+        fill(bus, top, left, bottom, left + 1, true);
+        fill(bus, top, right - 1, bottom, right, true);
+        // The menu's one-pixel shadow, right and bottom.
+        fill(bus, top + 2, right, bottom + 1, right + 1, true);
+        fill(bus, bottom, left + 2, bottom + 1, right + 1, true);
+        for (index, (name, _, is_disk)) in menu.items.iter().enumerate() {
+            let row_top = top + 1 + index as i16 * STANDARD_FILE_GET_ROW_HEIGHT;
+            let lit = menu.highlighted == Some(index);
+            if lit {
+                fill(bus, row_top, left + 1, row_top + STANDARD_FILE_GET_ROW_HEIGHT, right - 1, true);
+            }
+            if *is_disk {
+                self.draw_standard_file_icon(bus, left + 5, row_top + 2, &STANDARD_FILE_DISK_ICON, !lit);
+            } else {
+                self.draw_standard_file_icon(bus, left + 6, row_top + 3, &STANDARD_FILE_FOLDER_ICON, !lit);
+            }
+            Self::fb_draw_string_styled_ink(
+                bus,
+                screen_base,
+                row_bytes,
+                pixel_size,
+                screen_width,
+                screen_height,
+                left + 24,
+                row_top + 12,
+                &Self::standard_file_fit_name(name, 150),
+                0,
+                12,
+                0,
+                !lit,
+            );
+        }
+    }
+
+    /// Startside's patch: one pass of the folder pop-up held open: the row under the pointer highlighted. `None`
+    /// while the button is held; once up, the menu is taken away and `Some` gives the folder chosen, if any.
+    fn track_standard_file_popup(&mut self, bus: &mut MacMemoryBus) -> Option<Option<u32>> {
+        let (mouse_v, mouse_h) = self.input_state.mouse_position();
+        let menu = self.standard_file_popup.as_ref()?;
+        let (top, left, bottom, right) = menu.rect;
+        let row = (mouse_v >= top + 1 && mouse_v < bottom - 1 && mouse_h >= left && mouse_h < right)
+            .then(|| ((mouse_v - top - 1) / STANDARD_FILE_GET_ROW_HEIGHT) as usize)
+            .filter(|&row| row < menu.items.len());
+        if self.input_state.mouse_button_pressed() {
+            if row != menu.highlighted {
+                if let Some(menu) = self.standard_file_popup.as_mut() {
+                    menu.highlighted = row;
+                }
+                self.draw_standard_file_popup_menu(bus);
+            }
+            return None;
+        }
+        let menu = self.standard_file_popup.take()?;
+        let (top, left, bottom, right) = menu.rect;
+        let margin = crate::dialog_manager::DIALOG_DBOX_FRAME_MARGIN;
+        self.restore_dialog_pixels(bus, (top + margin, left + margin, bottom + 1 - margin, right + 1 - margin), &menu.saved);
+        self.consume_dialog_mouse_up();
+        Some(row.map(|row| menu.items[row].1))
     }
 
     /// Startside's patch: the volume's icon and name at the dialog's top right.
@@ -2700,6 +2838,26 @@ impl super::TrapDispatcher {
         let mut action = None;
         let mut consumed_event = false;
         let mut released = false;
+        // Startside's patch: the folder pop-up held open; a folder chosen is gone to (System 7.1).
+        if self.standard_file_popup.is_some() {
+            match self.track_standard_file_popup(bus) {
+                None => {
+                    self.standard_file_get_tracking = Some(tracking);
+                    return;
+                }
+                Some(chosen) => {
+                    if let Some(dir) = chosen.filter(|&dir| dir != tracking.current_dir_id) {
+                        tracking.current_dir_id = dir;
+                        tracking.entries =
+                            self.standard_file_get_candidates_in_directory(dir, tracking.file_types.as_deref());
+                        tracking.selected = 0;
+                    }
+                    self.draw_standard_file_get_dialog(bus, &tracking);
+                    self.standard_file_get_tracking = Some(tracking);
+                    return;
+                }
+            }
+        }
         // Startside's patch: a button held down is followed until the mouse button comes up, and acts only if
         // released inside (it acted at the mouse-down, never drawn pressed).
         if self.standard_file_pressed.is_some() {
@@ -2724,6 +2882,18 @@ impl super::TrapDispatcher {
             consumed_event = true;
             match event.what {
                 1 => {
+                    // Startside's patch: a press on the folder pop-up opens its menu.
+                    let (volume, folder) = self.standard_file_location_names(tracking.current_dir_id);
+                    let (_, _, popup) = Self::standard_file_popup_rect(
+                        tracking.bounds,
+                        STANDARD_FILE_GET_VOLUME_RECT,
+                        folder.as_deref().unwrap_or(&volume),
+                    );
+                    if Self::standard_file_point_in_rect(event.where_v, event.where_h, popup) {
+                        self.open_standard_file_popup(bus, popup, tracking.current_dir_id);
+                        self.standard_file_get_tracking = Some(tracking);
+                        return;
+                    }
                     if let Some((rect, title, is_default)) =
                         Self::standard_file_get_button_at(&tracking, event.where_v, event.where_h)
                     {
@@ -2815,6 +2985,7 @@ impl super::TrapDispatcher {
         tracking: StandardFileGetTrackingState,
         accepted: bool,
     ) {
+        self.standard_file_popup = None;
         self.restore_dialog_pixels(bus, tracking.bounds, &tracking.saved_pixels);
         // Startside's patch: the menu bar back as it was.
         self.draw_menu_bar_to_fb(bus);
@@ -3396,6 +3567,25 @@ impl super::TrapDispatcher {
         let mut action = None;
         let mut consumed_event = false;
         let mut released = false;
+        // Startside's patch: the folder pop-up held open; a folder chosen is gone to (System 7.1).
+        if self.standard_file_popup.is_some() {
+            match self.track_standard_file_popup(bus) {
+                None => {
+                    self.standard_file_put_tracking = Some(tracking);
+                    return;
+                }
+                Some(chosen) => {
+                    if let Some(dir) = chosen.filter(|&dir| dir != tracking.current_dir_id) {
+                        tracking.current_dir_id = dir;
+                        tracking.entries = self.standard_file_get_candidates_in_directory(dir, None);
+                        tracking.selected = None;
+                    }
+                    self.draw_standard_file_put_dialog(bus, &tracking);
+                    self.standard_file_put_tracking = Some(tracking);
+                    return;
+                }
+            }
+        }
         // Startside's patch: a press in the name field held down selects from where it went down to the pointer.
         if let Some(anchor) = self.standard_file_name_drag {
             let (_, mouse_h) = self.input_state.mouse_position();
@@ -3436,6 +3626,18 @@ impl super::TrapDispatcher {
             consumed_event = true;
             match event.what {
                 1 => {
+                    // Startside's patch: a press on the folder pop-up opens its menu.
+                    let (volume, folder) = self.standard_file_location_names(tracking.current_dir_id);
+                    let (_, _, popup) = Self::standard_file_popup_rect(
+                        tracking.bounds,
+                        STANDARD_FILE_PUT_VOLUME_RECT,
+                        folder.as_deref().unwrap_or(&volume),
+                    );
+                    if Self::standard_file_point_in_rect(event.where_v, event.where_h, popup) {
+                        self.open_standard_file_popup(bus, popup, tracking.current_dir_id);
+                        self.standard_file_put_tracking = Some(tracking);
+                        return;
+                    }
                     // Startside's patch: a click in the name field puts the insertion point at the nearest character
                     // boundary; held down, a drag selects (TEClick, IM I-384).
                     if Self::standard_file_point_in_rect(
@@ -3560,6 +3762,7 @@ impl super::TrapDispatcher {
     ) {
         self.restore_dialog_pixels(bus, tracking.bounds, &tracking.saved_pixels);
         self.standard_file_name_drag = None;
+        self.standard_file_popup = None;
         // Startside's patch: the menu bar back as it was.
         self.draw_menu_bar_to_fb(bus);
         let (vref, dir_id, _, writable) =

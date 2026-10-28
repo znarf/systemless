@@ -772,6 +772,17 @@ pub(crate) struct StandardFilePutTrackingState {
     pub saved_pixels: SavedPixels,
 }
 
+/// Startside's patch: Standard File's folder pop-up menu, open while the mouse button is held: the current folder, its
+/// parents, then the disk (name, directory id, whether it is the disk), drawn at `rect` (global, its frame; the shadow
+/// is outside it) over the pixels `saved` keeps.
+#[derive(Clone, Debug)]
+pub(crate) struct StandardFilePopupMenu {
+    pub items: Vec<(String, u32, bool)>,
+    pub rect: (i16, i16, i16, i16),
+    pub highlighted: Option<usize>,
+    pub saved: SavedPixels,
+}
+
 /// Startside's patch: a Standard File button held down (`standard_file_pressed`).
 #[derive(Clone, Debug)]
 pub(crate) struct StandardFilePressedButton {
@@ -2301,6 +2312,8 @@ pub struct TrapDispatcher {
     /// Startside's patch: a press in the Save dialog's name field held down: where it went down (a byte offset in
     /// the name), the anchor a drag selects from.
     pub(crate) standard_file_name_drag: Option<usize>,
+    /// Startside's patch: Standard File's folder pop-up held open (`StandardFilePopupMenu`).
+    pub(crate) standard_file_popup: Option<StandardFilePopupMenu>,
     /// Bounds owned by retained host overlays in an attached CPU adapter.
     /// These surfaces draw directly into the framebuffer without WindowRecords.
     pub(crate) external_host_overlay_rects: Vec<(i16, i16, i16, i16)>,
@@ -4194,6 +4207,7 @@ impl TrapDispatcher {
             standard_file_drawn: None,
             standard_file_pressed: None,
             standard_file_name_drag: None,
+            standard_file_popup: None,
             standard_file_get_tracking: None,
             external_host_overlay_rects: Vec::new(),
             dialog_items: HashMap::default(),

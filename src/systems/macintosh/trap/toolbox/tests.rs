@@ -13004,6 +13004,59 @@ fn sf_put_file_gui_click_places_the_insertion_point_and_drag_selects() {
     assert!(disp.is_standard_file_put_tracking());
 }
 
+// Startside's patch: Standard File's folder pop-up opens a menu of the path held down (the folder, then the disk),
+// the row under the pointer highlighted, and goes to the folder chosen on release (System 7.1; IM V-241).
+#[test]
+fn standard_get_file_gui_folder_popup_goes_up_to_the_folder_chosen() {
+    let _env = clear_standard_file_env();
+    let (mut disp, mut cpu, mut bus) = setup();
+    let screen_base = bus.alloc(64 * 342);
+    disp.set_screen_mode_for_test(screen_base, 64, 512, 342, 1);
+    let sp = TEST_SP;
+    let reply_ptr = 0x320B00u32;
+    let pilots_dir = disp.ensure_vfs_directory("Pilots");
+    disp.default_dir_id.with_mut(|default_dir_id| *default_dir_id = pilots_dir);
+    disp.yield_for_ui = true;
+    disp.vfs.insert("Pilots/Ace".to_string(), vec![1]);
+    disp.set_vfs_entry_metadata("Pilots/Ace", *b"TEXT", *b"ttxt", 0);
+    bus.write_word(sp, 0x0006); // StandardGetFile selector
+    bus.write_long(sp + 2, reply_ptr); // VAR reply
+    bus.write_long(sp + 6, 0); // typeList
+    bus.write_word(sp + 10, u16::MAX); // numTypes: -1, every type
+    bus.write_long(sp + 12, 0); // fileFilter
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    let bounds = disp.standard_file_get_tracking.as_ref().unwrap().bounds;
+    let (_, _, popup) = TrapDispatcher::standard_file_popup_rect(bounds, STANDARD_FILE_GET_VOLUME_RECT, "Pilots");
+    let press = ((popup.0 + popup.2) / 2, (popup.1 + popup.3) / 2);
+    let event = |what: u16, (v, h): (i16, i16)| QueuedEvent { what, message: 0, when: 0, where_v: v, where_h: h, modifiers: 0 };
+
+    disp.input_state.set_mouse_button_for_test(true);
+    disp.input_state.set_mouse_position_for_test(press);
+    disp.event_queue.push_back(event(1, press));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    let menu = disp.standard_file_popup.clone().expect("the pop-up's menu is open");
+    let names: Vec<&str> = menu.items.iter().map(|(name, _, _)| name.as_str()).collect();
+    assert_eq!(names[0], "Pilots");
+    assert_eq!(menu.items.len(), 2, "the folder, then the disk");
+    assert!(menu.items[1].2);
+
+    // Over the disk's row (16 pixels under the folder's).
+    let disk_row = (menu.rect.0 + 1 + 16 + 8, menu.rect.1 + 30);
+    disp.input_state.set_mouse_position_for_test(disk_row);
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert_eq!(disp.standard_file_popup.as_ref().unwrap().highlighted, Some(1));
+    assert_eq!(disp.standard_file_get_tracking.as_ref().unwrap().current_dir_id, pilots_dir, "not before release");
+
+    disp.input_state.set_mouse_button_for_test(false);
+    disp.event_queue.push_back(event(2, disk_row));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert!(disp.standard_file_popup.is_none());
+    let tracking = disp.standard_file_get_tracking.as_ref().expect("the dialog stays up");
+    assert_eq!(tracking.current_dir_id, menu.items[1].1, "gone up to the disk");
+    assert!(tracking.entries.iter().any(|entry| entry.is_directory && entry.display_name == "Pilots"));
+    assert!(disp.event_queue.iter().all(|event| event.what != 2), "its mouse-up is taken");
+}
+
 // Startside's patch: Standard File's lists leave out invisible files (the Finder's Desktop file) and are in name
 // order, ignoring case.
 #[test]
