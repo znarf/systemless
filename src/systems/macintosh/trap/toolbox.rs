@@ -2130,25 +2130,36 @@ impl super::TrapDispatcher {
         &self,
         requested_origin: Option<(i16, i16)>,
     ) -> (i16, i16, i16, i16) {
-        let (_, _, screen_width, screen_height, _) = self.screen_mode;
-        let centered_left = (screen_width as i16 - STANDARD_FILE_GET_DIALOG_WIDTH) / 2;
-        let centered_top = (screen_height as i16 - STANDARD_FILE_GET_DIALOG_HEIGHT) / 2;
+        Self::standard_file_dialog_bounds_at(
+            self.screen_mode,
+            requested_origin,
+            STANDARD_FILE_GET_DIALOG_WIDTH,
+            STANDARD_FILE_GET_DIALOG_HEIGHT,
+        )
+    }
+
+    /// The dialog's content rect at the application's `where` (centred without one), kept on the screen with its
+    /// double frame (8 pixels round it) below the menu bar.
+    fn standard_file_dialog_bounds_at(
+        screen_mode: (u32, u32, u16, u16, u16),
+        requested_origin: Option<(i16, i16)>,
+        width: i16,
+        height: i16,
+    ) -> (i16, i16, i16, i16) {
+        let (_, _, screen_width, screen_height, _) = screen_mode;
+        let centered_left = (screen_width as i16 - width) / 2;
+        let centered_top = (screen_height as i16 - height) / 2;
         let (requested_top, requested_left) =
             requested_origin.unwrap_or((centered_top, centered_left));
         let left = requested_left
             .max(8)
-            .min((screen_width as i16 - STANDARD_FILE_GET_DIALOG_WIDTH - 8).max(0));
+            .min((screen_width as i16 - width - 8).max(0));
         // Startside's patch: the double frame (8 pixels round the box) on screen too, below the menu bar: MacWrite's
         // Open dialog ran off the screen's bottom.
         let top = requested_top
             .max(28)
-            .min((screen_height as i16 - STANDARD_FILE_GET_DIALOG_HEIGHT - 8).max(0));
-        (
-            top,
-            left,
-            top + STANDARD_FILE_GET_DIALOG_HEIGHT,
-            left + STANDARD_FILE_GET_DIALOG_WIDTH,
-        )
+            .min((screen_height as i16 - height - 8).max(0));
+        (top, left, top + height, left + width)
     }
 
     fn standard_file_get_dialog_items(tracking: &StandardFileGetTrackingState) -> Vec<DialogItem> {
@@ -2859,15 +2870,13 @@ impl super::TrapDispatcher {
         }
     }
 
-    fn standard_file_put_dialog_bounds(&self) -> (i16, i16, i16, i16) {
-        let (_, _, screen_width, screen_height, _) = self.screen_mode;
-        let left = ((screen_width as i16 - STANDARD_FILE_DIALOG_WIDTH) / 2).max(8);
-        let top = ((screen_height as i16 - STANDARD_FILE_DIALOG_HEIGHT) / 2).max(24);
-        (
-            top,
-            left,
-            top + STANDARD_FILE_DIALOG_HEIGHT,
-            left + STANDARD_FILE_DIALOG_WIDTH,
+    fn standard_file_put_dialog_bounds(&self, requested_origin: Option<(i16, i16)>) -> (i16, i16, i16, i16) {
+        // Startside's patch: at the application's `where`, as the Open dialog (it was always centred).
+        Self::standard_file_dialog_bounds_at(
+            self.screen_mode,
+            requested_origin,
+            STANDARD_FILE_DIALOG_WIDTH,
+            STANDARD_FILE_DIALOG_HEIGHT,
         )
     }
 
@@ -3231,11 +3240,12 @@ impl super::TrapDispatcher {
         pop_total: u32,
         prompt_ptr: u32,
         default_name_ptr: u32,
+        requested_origin: Option<(i16, i16)>,
     ) {
         let default_name = standard_file_default_name(bus, default_name_ptr);
         let mut name = decode_mac_roman(&default_name);
         Self::standard_file_clamp_name(&mut name);
-        let bounds = self.standard_file_put_dialog_bounds();
+        let bounds = self.standard_file_put_dialog_bounds(requested_origin);
         let saved_pixels = self.save_dialog_pixels(bus, bounds);
         let name_len = name.len().min(i16::MAX as usize) as i16;
         let current_dir_id = *self.default_dir_id;
@@ -13329,6 +13339,13 @@ impl super::TrapDispatcher {
                         .map(|offset| bus.read_long(sp + offset))
                         .unwrap_or(0);
                     if self.yield_for_ui {
+                        // Startside's patch: SFPutFile's and SFPPutFile's `where`, the Point pushed first (above
+                        // the prompt).
+                        let requested_origin = prompt_offset
+                            .filter(|_| matches!(selector, 0x0001 | 0x0003))
+                            .map(|offset| {
+                                (bus.read_word(sp + offset + 4) as i16, bus.read_word(sp + offset + 6) as i16)
+                            });
                         self.begin_standard_file_put_tracking(
                             bus,
                             modern_reply,
@@ -13337,6 +13354,7 @@ impl super::TrapDispatcher {
                             pop_total,
                             prompt_ptr,
                             default_name_ptr,
+                            requested_origin,
                         );
                         return Some(Ok(()));
                     }
@@ -13386,8 +13404,11 @@ impl super::TrapDispatcher {
                     if let Some((num_types_offset, type_list_offset)) = get_filter_offsets {
                         let num_types = bus.read_word(sp + num_types_offset) as i16;
                         let type_list_ptr = bus.read_long(sp + type_list_offset);
+                        // Startside's patch: `where` is the Point pushed first, above the prompt: SP+24 for SFGetFile
+                        // (the fileFilter at +16, the prompt at +20), +30 for SFPGetFile. It was read two bytes
+                        // short (the prompt's low word as `v`), and the dialog landed at the screen's bottom.
                         let requested_origin = matches!(selector, 0x0002 | 0x0004).then(|| {
-                            let where_offset = if selector == 0x0002 { 22 } else { 28 };
+                            let where_offset = if selector == 0x0002 { 24 } else { 30 };
                             (
                                 bus.read_word(sp + where_offset) as i16,
                                 bus.read_word(sp + where_offset + 2) as i16,

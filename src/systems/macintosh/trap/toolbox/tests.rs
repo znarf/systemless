@@ -12733,9 +12733,10 @@ fn sf_get_file_gui_tracking_opens_selected_pilots_file_with_wdrefnum() {
     bus.write_long(sp + 2, reply_ptr); // VAR reply
     bus.write_long(sp + 10, type_list_ptr); // typeList
     bus.write_word(sp + 14, 1); // numTypes
-    bus.write_long(sp + 18, 0); // fileFilter
-    bus.write_word(sp + 22, 84); // where.v
-    bus.write_word(sp + 24, 222); // where.h
+    bus.write_long(sp + 16, 0); // fileFilter
+    bus.write_long(sp + 20, 0); // prompt
+    bus.write_word(sp + 24, 84); // where.v
+    bus.write_word(sp + 26, 222); // where.h
 
     let start = disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus);
     assert!(start.unwrap().is_ok());
@@ -12800,9 +12801,10 @@ fn sf_get_file_gui_cancel_acts_only_when_released_inside() {
     bus.write_long(sp + 2, reply_ptr); // VAR reply
     bus.write_long(sp + 10, type_list_ptr); // typeList
     bus.write_word(sp + 14, 1); // numTypes
-    bus.write_long(sp + 18, 0); // fileFilter
-    bus.write_word(sp + 22, 84); // where.v
-    bus.write_word(sp + 24, 222); // where.h
+    bus.write_long(sp + 16, 0); // fileFilter
+    bus.write_long(sp + 20, 0); // prompt
+    bus.write_word(sp + 24, 84); // where.v
+    bus.write_word(sp + 26, 222); // where.h
 
     assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
     assert_eq!(disp.standard_file_get_tracking.as_ref().unwrap().bounds, (84, 222, 262, 578));
