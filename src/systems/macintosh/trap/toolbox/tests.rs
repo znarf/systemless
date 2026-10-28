@@ -12942,6 +12942,68 @@ fn sf_put_file_gui_save_needs_a_name_and_files_cannot_be_picked() {
     assert_eq!(tracking.selected, Some(1), "a folder can");
 }
 
+// Startside's patch: a click in the Save dialog's name field puts the insertion point at the nearest character
+// boundary (typing then inserts there, the name kept), and a drag selects from the press to the pointer.
+#[test]
+fn sf_put_file_gui_click_places_the_insertion_point_and_drag_selects() {
+    let _env = clear_standard_file_env();
+    let (mut disp, mut cpu, mut bus) = setup();
+    let screen_base = bus.alloc(64 * 342);
+    disp.set_screen_mode_for_test(screen_base, 64, 512, 342, 1);
+    let sp = TEST_SP;
+    let reply_ptr = 0x320D00u32;
+    let name_ptr = 0x320E00u32;
+    let prompt_ptr = 0x320F00u32;
+    disp.yield_for_ui = true;
+    bus.write_pstring(name_ptr, b"Dullsville");
+    bus.write_byte(prompt_ptr, 0);
+    bus.write_word(sp, 0x0001); // SFPutFile selector
+    bus.write_long(sp + 2, reply_ptr);
+    bus.write_long(sp + 6, 0);
+    bus.write_long(sp + 10, name_ptr);
+    bus.write_long(sp + 14, prompt_ptr);
+    bus.write_word(sp + 18, 100); // where.v
+    bus.write_word(sp + 20, 124); // where.h
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    let (top, left, _, _) = disp.standard_file_put_tracking.as_ref().unwrap().bounds;
+    // The name's glyphs start a pixel inside its text rect, (157, 15) in the dialog.
+    let origin = left + 15 + 1;
+    let x_at = |chars: usize| origin + TrapDispatcher::fb_measure_string(&"Dullsville"[..chars], 0, 12);
+    let v = top + 165;
+    let event = |what: u16, h: i16| QueuedEvent { what, message: 0, when: 0, where_v: v, where_h: h, modifiers: 0 };
+    let selection = |disp: &TrapDispatcher| {
+        let tracking = disp.standard_file_put_tracking.as_ref().unwrap();
+        (tracking.sel_start, tracking.sel_end)
+    };
+
+    // A click between "Dulls" and "ville": the insertion point there, the name kept.
+    disp.event_queue.push_back(event(1, x_at(5) + 1));
+    disp.event_queue.push_back(event(2, x_at(5) + 1));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert_eq!(selection(&disp), (5, 5));
+    disp.event_queue.push_back(QueuedEvent { what: 3, message: u32::from(b'X'), when: 0, where_v: 0, where_h: 0, modifiers: 0 });
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert_eq!(disp.standard_file_put_tracking.as_ref().unwrap().name, "DullsXville");
+
+    // Pressed after "Du" and dragged to after "DullsX": those four characters selected while held, and after.
+    disp.input_state.set_mouse_button_for_test(true);
+    disp.input_state.set_mouse_position_for_test((v, x_at(2)));
+    disp.event_queue.push_back(event(1, x_at(2)));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert_eq!(selection(&disp), (2, 2));
+    let x_after_x = origin + TrapDispatcher::fb_measure_string("DullsX", 0, 12);
+    disp.input_state.set_mouse_position_for_test((v, x_after_x));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert_eq!(selection(&disp), (2, 6));
+    disp.input_state.set_mouse_button_for_test(false);
+    disp.event_queue.push_back(event(2, x_after_x));
+    assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
+    assert_eq!(selection(&disp), (2, 6));
+    assert!(disp.standard_file_name_drag.is_none());
+    assert!(disp.event_queue.iter().all(|event| event.what != 2), "the drag's mouse-up is taken");
+    assert!(disp.is_standard_file_put_tracking());
+}
+
 // Startside's patch: Standard File's lists leave out invisible files (the Finder's Desktop file) and are in name
 // order, ignoring case.
 #[test]

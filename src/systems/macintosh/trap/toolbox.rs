@@ -3185,7 +3185,38 @@ impl super::TrapDispatcher {
         self.draw_standard_file_volume_label(bus, tracking.bounds, STANDARD_FILE_PUT_VOLUME_LABEL_RECT, &volume);
         self.draw_standard_file_separator(bus, tracking.bounds, STANDARD_FILE_PUT_SEPARATOR_RECT);
         self.draw_standard_file_put_list(bus, tracking);
+        self.draw_standard_file_name_caret(bus, tracking);
         self.standard_file_drawn = bus.screen_mark();
+    }
+
+    /// Startside's patch: the byte offset in the name of the character boundary nearest a global `h` in the name field
+    /// (the glyphs start a pixel inside its text rect, as TextEdit draws them).
+    fn standard_file_name_offset_at(tracking: &StandardFilePutTrackingState, h: i16) -> usize {
+        let origin = tracking.bounds.1 + STANDARD_FILE_NAME_RECT.1 + 1;
+        let mut best = (0usize, i32::MAX);
+        let boundaries = tracking.name.char_indices().map(|(i, _)| i).chain(std::iter::once(tracking.name.len()));
+        for at in boundaries {
+            let x = origin + Self::fb_measure_string(&tracking.name[..at], 0, 12);
+            let distance = (i32::from(x) - i32::from(h)).abs();
+            if distance < best.1 {
+                best = (at, distance);
+            }
+        }
+        best.0
+    }
+
+    /// Startside's patch: the insertion point, a line before the character it stands at, when nothing is selected
+    /// (it blinks on a Mac; drawn steady here).
+    fn draw_standard_file_name_caret(&self, bus: &mut MacMemoryBus, tracking: &StandardFilePutTrackingState) {
+        let (start, end) = Self::standard_file_selection_range(tracking);
+        if start != end {
+            return;
+        }
+        let (top, left, bottom, _) = Self::dialog_item_screen_rect(tracking.bounds, STANDARD_FILE_NAME_RECT);
+        let x = left + Self::fb_measure_string(&tracking.name[..start], 0, 12);
+        let (screen_base, row_bytes, screen_width, screen_height, pixel_size) =
+            self.get_screen_params();
+        Self::fb_fill_rect(bus, screen_base, row_bytes, pixel_size, screen_width, screen_height, top, x, bottom, x + 1, true);
     }
 
     /// Startside's patch: System 7.1's "New" button with a folder, under Desktop. Creating a folder needs its own
@@ -3365,6 +3396,23 @@ impl super::TrapDispatcher {
         let mut action = None;
         let mut consumed_event = false;
         let mut released = false;
+        // Startside's patch: a press in the name field held down selects from where it went down to the pointer.
+        if let Some(anchor) = self.standard_file_name_drag {
+            let (_, mouse_h) = self.input_state.mouse_position();
+            let at = Self::standard_file_name_offset_at(&tracking, mouse_h);
+            let (sel_start, sel_end) = (anchor.min(at) as i16, anchor.max(at) as i16);
+            if (sel_start, sel_end) != (tracking.sel_start, tracking.sel_end) {
+                tracking.sel_start = sel_start;
+                tracking.sel_end = sel_end;
+                self.draw_standard_file_put_dialog(bus, &tracking);
+            }
+            if self.input_state.mouse_button_pressed() {
+                self.standard_file_put_tracking = Some(tracking);
+                return;
+            }
+            self.standard_file_name_drag = None;
+            self.consume_dialog_mouse_up();
+        }
         // Startside's patch: a button held down is followed until the mouse button comes up (as the Open dialog).
         if self.standard_file_pressed.is_some() {
             match self.track_standard_file_pressed_button(bus, tracking.bounds) {
@@ -3388,6 +3436,21 @@ impl super::TrapDispatcher {
             consumed_event = true;
             match event.what {
                 1 => {
+                    // Startside's patch: a click in the name field puts the insertion point at the nearest character
+                    // boundary; held down, a drag selects (TEClick, IM I-384).
+                    if Self::standard_file_point_in_rect(
+                        event.where_v - tracking.bounds.0,
+                        event.where_h - tracking.bounds.1,
+                        crate::dialog_manager::edit_text_frame_rect(STANDARD_FILE_NAME_RECT),
+                    ) {
+                        let at = Self::standard_file_name_offset_at(&tracking, event.where_h);
+                        tracking.sel_start = at as i16;
+                        tracking.sel_end = at as i16;
+                        if self.input_state.mouse_button_pressed() {
+                            self.standard_file_name_drag = Some(at);
+                        }
+                        break;
+                    }
                     if let Some((rect, title, is_default)) =
                         self.standard_file_put_button_at(&tracking, event.where_v, event.where_h)
                     {
@@ -3496,6 +3559,7 @@ impl super::TrapDispatcher {
         accepted: bool,
     ) {
         self.restore_dialog_pixels(bus, tracking.bounds, &tracking.saved_pixels);
+        self.standard_file_name_drag = None;
         // Startside's patch: the menu bar back as it was.
         self.draw_menu_bar_to_fb(bus);
         let (vref, dir_id, _, writable) =

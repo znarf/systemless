@@ -9145,13 +9145,15 @@ impl super::TrapDispatcher {
                     let line_height = metrics.ascent + metrics.descent + metrics.leading;
                     let selection_top = top;
                     let selection_bottom = top.saturating_add(line_height).min(bottom);
+                    // Startside's patch: measured in the size the text was just drawn in, not the current port's
+                    // (`self.tx_size`): in SimCity's Save dialog the highlight stopped a character short.
                     let selection_left = if start == 0 {
                         left
                     } else {
                         left + Self::TE_LINE_LEFT_INSET
                             + self.te_measure_text_width(
                                 font_id,
-                                self.tx_size,
+                                font_size,
                                 &text_bytes,
                                 0,
                                 start,
@@ -9161,7 +9163,7 @@ impl super::TrapDispatcher {
                         right
                     } else {
                         left + Self::TE_LINE_LEFT_INSET
-                            + self.te_measure_text_width(font_id, self.tx_size, &text_bytes, 0, end)
+                            + self.te_measure_text_width(font_id, font_size, &text_bytes, 0, end)
                     };
                     if selection_left < selection_right && selection_top < selection_bottom {
                         if self.ui_theme_id() == UiThemeId::ClassicSystem7 {

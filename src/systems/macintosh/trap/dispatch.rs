@@ -2298,6 +2298,9 @@ pub struct TrapDispatcher {
     /// Startside's patch: the Standard File button held down, tracked until the button comes up (TrackControl's
     /// inButton, IM I-323): drawn inverted while the pointer is inside it, acting only when released inside.
     pub(crate) standard_file_pressed: Option<StandardFilePressedButton>,
+    /// Startside's patch: a press in the Save dialog's name field held down: where it went down (a byte offset in
+    /// the name), the anchor a drag selects from.
+    pub(crate) standard_file_name_drag: Option<usize>,
     /// Bounds owned by retained host overlays in an attached CPU adapter.
     /// These surfaces draw directly into the framebuffer without WindowRecords.
     pub(crate) external_host_overlay_rects: Vec<(i16, i16, i16, i16)>,
@@ -4190,6 +4193,7 @@ impl TrapDispatcher {
             standard_file_put_tracking: None,
             standard_file_drawn: None,
             standard_file_pressed: None,
+            standard_file_name_drag: None,
             standard_file_get_tracking: None,
             external_host_overlay_rects: Vec::new(),
             dialog_items: HashMap::default(),
