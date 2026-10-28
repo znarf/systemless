@@ -438,8 +438,15 @@ fn normalize_boolean_transfer_mode(mode: i16) -> i16 {
     match mode {
         0..=3 => mode,
         8..=11 => mode - 8,
+        12..=15 => mode - 12,
         _ => 0,
     }
+}
+
+/// notPatCopy..notPatBic apply the pattern's inverse with the matching
+/// patCopy..patBic operation. Inside Macintosh Volume I, I-157.
+fn pattern_inverted(mode: i16) -> bool {
+    (12..=15).contains(&mode)
 }
 
 /// What a whole-row 1bpp operation does to every bit of the clipped rect.
@@ -515,6 +522,7 @@ fn invert_indexed_pixel(old: u8) -> u8 {
 }
 
 fn apply_boolean_transfer_1(old: bool, mode: i16, source_is_black: bool) -> bool {
+    let source_is_black = source_is_black != pattern_inverted(mode);
     match normalize_boolean_transfer_mode(mode) {
         0 => source_is_black,
         1 => old || source_is_black,
@@ -531,6 +539,7 @@ fn apply_boolean_transfer_8(
     fg_idx: u8,
     bg_idx: u8,
 ) -> u8 {
+    let source_is_black = source_is_black != pattern_inverted(mode);
     match normalize_boolean_transfer_mode(mode) {
         0 => {
             if source_is_black {
@@ -571,6 +580,7 @@ fn apply_boolean_transfer_32(
     fg_color: u32,
     bg_color: u32,
 ) -> u32 {
+    let source_is_black = source_is_black != pattern_inverted(mode);
     match normalize_boolean_transfer_mode(mode) {
         0 => {
             if source_is_black {
@@ -2024,7 +2034,10 @@ impl super::TrapDispatcher {
                 ShapeOp::Invert => Some(BitRowOp::Toggle),
                 ShapeOp::Erase => solid_bit_row_op(self.bk_pat),
                 ShapeOp::Fill(pattern) => solid_bit_row_op(pattern),
-                ShapeOp::Paint if normalize_boolean_transfer_mode(self.pn_mode) == 0 => {
+                ShapeOp::Paint
+                    if normalize_boolean_transfer_mode(self.pn_mode) == 0
+                        && !pattern_inverted(self.pn_mode) =>
+                {
                     solid_bit_row_op(self.pn_pat)
                 }
                 _ => None,
@@ -2705,7 +2718,12 @@ impl super::TrapDispatcher {
         bk_pat: [u8; 8],
     ) -> Option<u8> {
         let pattern = match op {
-            ShapeOp::Paint if normalize_boolean_transfer_mode(self.pn_mode) == 0 => pn_pat,
+            ShapeOp::Paint
+                if normalize_boolean_transfer_mode(self.pn_mode) == 0
+                    && !pattern_inverted(self.pn_mode) =>
+            {
+                pn_pat
+            }
             ShapeOp::Erase => bk_pat,
             ShapeOp::Fill(pattern) => *pattern,
             _ => return None,
@@ -2723,8 +2741,8 @@ impl super::TrapDispatcher {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_boolean_transfer_1, apply_boolean_transfer_8, blend_rgb, ctab_rgb_for_value,
-        ctab_uses_noncanonical_black, fg_bg_low_contrast, indexed_shape_color_index,
+        apply_boolean_transfer_1, apply_boolean_transfer_32, apply_boolean_transfer_8, blend_rgb,
+        ctab_rgb_for_value, ctab_uses_noncanonical_black, fg_bg_low_contrast, indexed_shape_color_index,
         lighten_stem_alpha, normalize_boolean_transfer_mode, shape_palette_index_for_rgb,
     };
     use crate::memory::{MacMemoryBus, MemoryBus};
@@ -2865,6 +2883,27 @@ mod tests {
         assert_eq!(normalize_boolean_transfer_mode(3), 3);
         assert_eq!(normalize_boolean_transfer_mode(8), 0);
         assert_eq!(normalize_boolean_transfer_mode(11), 3);
+    }
+
+    #[test]
+    fn not_pattern_modes_apply_the_inverted_pattern() {
+        assert_eq!(normalize_boolean_transfer_mode(12), 0);
+        assert_eq!(normalize_boolean_transfer_mode(15), 3);
+        // notPatCopy: a black pattern pixel paints white.
+        assert!(!apply_boolean_transfer_1(true, 12, true));
+        assert!(apply_boolean_transfer_1(false, 12, false));
+        // notPatOr: a white pattern pixel paints black.
+        assert!(apply_boolean_transfer_1(false, 13, false));
+        assert!(!apply_boolean_transfer_1(false, 13, true));
+        // notPatBic: only the pattern's black pixels keep the destination.
+        assert!(apply_boolean_transfer_1(true, 15, true));
+        assert!(!apply_boolean_transfer_1(true, 15, false));
+        assert_eq!(apply_boolean_transfer_8(77, 15, true, 255, 0), 77);
+        assert_eq!(apply_boolean_transfer_8(77, 15, false, 255, 0), 0);
+        assert_eq!(
+            apply_boolean_transfer_32(0x12_3456, 15, false, 0, 0xFF_FFFF),
+            0xFF_FFFF
+        );
     }
 
     #[test]
