@@ -827,6 +827,9 @@ pub struct DialogButtonTrackingState {
     pub title: String,
     pub is_default: bool,
     pub highlighted: bool,
+    /// Startside's patch: for a checkbox or radio button, its mark as drawn before the press, put back when the
+    /// pointer leaves it or the button comes up; `None` for a push button.
+    pub mark: Option<SavedPixels>,
 }
 
 /// Push-button/click tracking for a front modal dialog. ModalDialog-retained

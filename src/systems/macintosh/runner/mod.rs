@@ -3050,7 +3050,8 @@ impl FixtureRunner {
         self.dispatcher.set_mouse_position(v, h);
         if self.dispatcher.input_state.mouse_button_pressed() {
             if self.dispatcher.dialog_tracking.as_ref().is_some_and(|tracking| tracking.active_button.is_some()) {
-                self.dispatcher.handle_dialog_button_tracking(&mut self.bus);
+                self.dispatcher
+                    .handle_dialog_button_tracking(&mut self.m68k.cpu, &mut self.bus);
             }
             self.dispatcher.update_standard_file_button_for_mouse(&mut self.bus);
         }
