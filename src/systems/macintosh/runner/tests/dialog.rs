@@ -49,6 +49,7 @@ fn mouse_move_updates_held_dialog_button_before_release() {
     tracking.active_button = Some(DialogButtonTrackingState {
         mouse_down: QueuedEvent { what: 1, message: 0, when: 0, where_v: 50, where_h: 60, modifiers: 0 },
         item_no: 1, rect: (20, 20, 40, 100), title: "OK".into(), is_default: false, highlighted: true,
+        mark: None,
     });
     runner.dispatcher.dialog_tracking = Some(tracking);
     runner.dispatcher.input_state.set_mouse_button_for_test(true);
