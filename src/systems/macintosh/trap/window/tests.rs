@@ -1181,6 +1181,57 @@ fn wdef_call_restores_the_callers_port_after_it_returns() {
     assert!(at + 10 <= tramp + super::super::TrapDispatcher::WDEF_TRAMPOLINE_SIZE);
 }
 
+/// Startside's patch: SizeWindow on a window with the application's own WDEF keeps the WDEF's frame (its
+/// regions grow by the size change, the frame above the content kept) and has the WDEF recompute and redraw it
+/// (wCalcRgns, then wDraw). SimCity's edit window lost its title bar and info bar when resized.
+#[test]
+fn sizewindow_on_an_application_wdef_window_keeps_its_frame_and_redraws_it() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let proc_id = (200i16 << 4) | 3;
+    install_wind_resource(&mut disp, &mut bus, 600, (60, 16, 300, 480), proc_id, true, false, 0, b"");
+    let wdef_proc = install_wdef_resource(&mut disp, &mut bus, 200);
+    let sp = TEST_SP - 10;
+    cpu.write_reg(Register::A7, sp);
+    cpu.write_reg(Register::PC, 0x1234_5678);
+    bus.write_long(sp, 0);
+    bus.write_long(sp + 4, 0);
+    bus.write_word(sp + 8, 600);
+    bus.write_long(sp + 10, 0);
+    dispatch(&mut disp, 0x246, &mut cpu, &mut bus).unwrap().unwrap();
+    let window = bus.read_long(sp + 10);
+
+    // As the WDEF's wCalcRgns left them: a frame 30 pixels taller than the content, 2 wider each side.
+    let struc = bus.read_long(window + super::super::TrapDispatcher::WINDOW_STRUC_RGN_OFFSET);
+    let cont = bus.read_long(window + super::super::TrapDispatcher::WINDOW_CONT_RGN_OFFSET);
+    super::super::TrapDispatcher::write_region_handle_rect(&mut bus, struc, Some((30, 14, 302, 482)));
+    super::super::TrapDispatcher::write_region_handle_rect(&mut bus, cont, Some((60, 16, 300, 480)));
+
+    // SizeWindow(window, 300, 200, TRUE): 164 narrower, 40 shorter.
+    let sp = TEST_SP - 10;
+    cpu.write_reg(Register::A7, sp);
+    cpu.write_reg(Register::PC, 0x2000_0000);
+    bus.write_byte(sp, 1);
+    bus.write_word(sp + 2, 200);
+    bus.write_word(sp + 4, 300);
+    bus.write_long(sp + 6, window);
+    dispatch(&mut disp, 0x11D, &mut cpu, &mut bus).unwrap().unwrap();
+
+    assert_eq!(
+        super::super::TrapDispatcher::region_handle_rect(&bus, struc),
+        Some((30, 14, 262, 318)),
+        "the frame keeps its title bar above the content"
+    );
+    assert_eq!(super::super::TrapDispatcher::region_handle_rect(&bus, cont), Some((60, 16, 260, 316)));
+    let tramp = disp.window_def_trampoline;
+    assert_eq!(cpu.read_reg(Register::PC), tramp, "the WDEF is called once the trap returns");
+    assert_eq!(bus.read_long(tramp + 32), wdef_proc);
+    assert_eq!(bus.read_word(tramp + 22), super::super::TrapDispatcher::WDEF_WCALC_RGNS_MSG as u16);
+    assert_eq!(bus.read_word(tramp + 46), 0x4EF9, "then wDraw");
+    let draw = bus.read_long(tramp + 48);
+    assert_eq!(bus.read_word(draw + 22), super::super::TrapDispatcher::WDEF_WDRAW_MSG as u16);
+    assert_eq!(bus.read_long(sp + 6), 0x2000_0000, "and returns to SizeWindow's caller");
+}
+
 // ---------------------------------------------------------------
 // 1. InitWindows (0x112) -- no-op, returns Ok
 // ---------------------------------------------------------------

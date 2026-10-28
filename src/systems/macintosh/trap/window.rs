@@ -5205,11 +5205,37 @@ impl super::TrapDispatcher {
                     let content_rect = (content_top, 0, h, w);
                     let global_content =
                         self.window_local_rect_to_global(bus, the_window, content_rect);
-                    let global_structure = self.window_structure_global_rect_for_window(
-                        bus,
-                        the_window,
-                        global_content,
-                    );
+                    // Startside's patch: a window with the application's own WDEF keeps its frame. Its regions
+                    // grow or shrink by the size change here (its frame around the content stays as it was), the
+                    // WDEF recomputes them and draws the frame once the trap returns (wCalcRgns, wDraw, as
+                    // ShowWindow). The standard geometry cut SimCity's taller frame to a title bar: its own title bar
+                    // and info bar were erased as uncovered, and nothing drew them again.
+                    let custom_wdef = self.window_uses_custom_def_proc(bus, the_window);
+                    let resized = |rect: Option<(i16, i16, i16, i16)>| {
+                        let (old_h, old_w) = old_content_rect
+                            .map(|(t, l, b, r)| (b - t, r - l))
+                            .unwrap_or((h, w));
+                        rect.map(|(t, l, b, r)| (t, l, b + (h - old_h), r + (w - old_w)))
+                    };
+                    let custom_regions = custom_wdef
+                        .then(|| {
+                            let cont = resized(Self::region_handle_rect(
+                                bus,
+                                bus.read_long(the_window + Self::WINDOW_CONT_RGN_OFFSET),
+                            ))?;
+                            let struc = resized(Self::region_handle_rect(
+                                bus,
+                                bus.read_long(the_window + Self::WINDOW_STRUC_RGN_OFFSET),
+                            ))?;
+                            Some((cont, struc))
+                        })
+                        .flatten();
+                    let (global_content, global_structure) = custom_regions.unwrap_or_else(|| {
+                        (
+                            global_content,
+                            self.window_structure_global_rect_for_window(bus, the_window, global_content),
+                        )
+                    });
                     Self::write_region_handle_rect(
                         bus,
                         bus.read_long(the_window + Self::WINDOW_CONT_RGN_OFFSET),
@@ -5295,6 +5321,13 @@ impl super::TrapDispatcher {
                 }
 
                 cpu.write_reg(Register::A7, sp + 10);
+                if the_window != 0
+                    && self.window_uses_custom_def_proc(bus, the_window)
+                    && self.window_visible(bus, the_window)
+                {
+                    self.pending_wdef_redraws.retain(|&w| w != the_window);
+                    self.arm_window_def_draw(cpu, bus, the_window);
+                }
                 Ok(())
             }
 
