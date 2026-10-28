@@ -4858,6 +4858,33 @@
     }
 
     #[test]
+    fn closergn_rounds_half_pixel_crossings_up_like_quickdraw() {
+        // Startside's patch: SimCity's budget arrow, MoveTo(216,30) LineTo(208,38) LineTo(224,38) LineTo(216,30) in an
+        // open region. On the Macintosh (a System 7 screenshot) its rows are [216,217) at the tip and [209,224) at the
+        // base: each edge crosses a row's middle at a half pixel, which rounds up.
+        let (mut d, mut cpu, mut bus) = setup_with_port();
+        let dst_ptr = bus.alloc(10);
+        let dst = bus.alloc(4);
+        make_rgn(&mut bus, dst_ptr, dst, 0, 0, 0, 0);
+        assert!(d.dispatch_quickdraw(true, 0x0DA, &mut cpu, &mut bus).unwrap().is_ok());
+        for (trap, h, v) in [(0x093u16, 216i16, 30i16), (0x091, 208, 38), (0x091, 224, 38), (0x091, 216, 30)] {
+            cpu.write_reg(Register::A7, TEST_SP);
+            bus.write_word(TEST_SP, v as u16);
+            bus.write_word(TEST_SP + 2, h as u16);
+            assert!(d.dispatch_quickdraw(true, trap, &mut cpu, &mut bus).unwrap().is_ok());
+        }
+        cpu.write_reg(Register::A7, TEST_SP);
+        bus.write_long(TEST_SP, dst);
+        assert!(d.dispatch_quickdraw(true, 0x0DB, &mut cpu, &mut bus).unwrap().is_ok());
+
+        assert_eq!(read_rgn_bbox(&bus, dst), (30, 209, 38, 224));
+        let row = |bus: &MacMemoryBus, y: i16| (200..232).filter(|&x| TrapDispatcher::region_contains_point(bus, dst, y, x)).collect::<Vec<i16>>();
+        assert_eq!(row(&bus, 30), vec![216]);
+        assert_eq!(row(&bus, 31), (215..218).collect::<Vec<_>>());
+        assert_eq!(row(&bus, 37), (209..224).collect::<Vec<_>>());
+    }
+
+    #[test]
     fn test_new_rgn() {
         let (mut d, mut cpu, mut bus) = setup();
         let result = d.dispatch_quickdraw(true, 0x0D8, &mut cpu, &mut bus);

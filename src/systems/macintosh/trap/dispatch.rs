@@ -1466,6 +1466,9 @@ pub struct TrapDispatcher {
     pub(crate) find_window_hit_stub: u32,
     /// Startside's patch: application-WDEF windows whose highlight changed, to redraw with wDraw at the trap's end.
     pub(crate) pending_wdef_redraws: Vec<u32>,
+    /// Startside's patch: the next TextEdit redraw erases only the rows its lines take, not the whole viewRect
+    /// (caret blinks and activation, which on a Macintosh only invert the caret or the selection).
+    pub(crate) te_erase_text_rows_only: bool,
     /// Startside's patch: the text state (font, face, size) of the dialog being drawn, over the current port's.
     pub(crate) dialog_text_state: std::cell::Cell<Option<(i16, u8, i16)>>,
     /// Startside's patch: alert windows (the Dialog Manager outlines an alert's default button, IM I-401; a dialog's
@@ -3869,6 +3872,7 @@ impl TrapDispatcher {
             window_def_trampoline: 0,
             find_window_hit_stub: 0,
             pending_wdef_redraws: Vec::new(),
+            te_erase_text_rows_only: false,
             dialog_text_state: std::cell::Cell::new(None),
             alert_dialog_ptrs: std::collections::HashSet::new(),
             drawing_alert: std::cell::Cell::new(false),
