@@ -6349,13 +6349,21 @@ impl super::TrapDispatcher {
                     }
                 }
 
+                // Startside's patch: a push button held down stays inverted while the pointer is inside it (TrackControl
+                // with inButton, IM I-323). The snapshot above is the dialog at rest, so without this the highlight
+                // drawn at the press was painted over on the next frame and never seen.
+                // A checkbox or radio button held (`mark`) has its mark drawn pressed instead.
                 if let Some(button) = tracking.active_button.as_ref().filter(|button| button.highlighted) {
-                    let (top, left, _, _) = tracking.bounds;
-                    let (it, il, ib, ir) = button.rect;
-                    self.draw_dialog_button_highlight_state(
-                        bus, (top + it, left + il, top + ib, left + ir),
-                        &button.title, button.is_default, button.highlighted,
-                    );
+                    let rect = Self::dialog_item_screen_rect(tracking.bounds, button.rect);
+                    if button.mark.is_some() {
+                        let item_type = tracking
+                            .items
+                            .get(button.item_no.saturating_sub(1) as usize)
+                            .map_or(0, |item| item.item_type);
+                        self.draw_dialog_mark_pressed(bus, rect, crate::dialog_manager::dialog_item_base_type(item_type));
+                    } else {
+                        self.draw_dialog_button_highlight_state(bus, rect, &button.title, button.is_default, true);
+                    }
                 }
 
                 if let Some(ref popup) = tracking.active_popup {
@@ -9129,6 +9137,66 @@ mod redraw_chrome_tests {
             0x00,
             "once the dialog snapshot is final, normal port blitting should resume"
         );
+    }
+
+    // Startside's patch: the chrome pass restores a ModalDialog's snapshot at rest every frame; a push button held
+    // down must still show inverted after it, and go back to normal once the pointer leaves it.
+    #[test]
+    fn redraw_chrome_keeps_a_held_dialog_button_inverted() {
+        let (mut disp, _cpu, mut bus) = setup_with_port();
+
+        let screen_base = bus.alloc(64 * 64);
+        for i in 0..64u32 * 64 {
+            bus.write_byte(screen_base + i, 0x00);
+        }
+        disp.screen_mode = (screen_base, 64, 64, 64, 8);
+        bus.write_long(0x0824, screen_base);
+        bus.write_word(crate::memory::globals::addr::MBAR_HEIGHT, 0);
+
+        let bounds = (10, 10, 50, 60);
+        let at_rest = disp.save_dialog_pixels(&bus, bounds);
+        let item_rect = (10, 10, 30, 40);
+        let probe = screen_base + 30 * 64 + 35;
+
+        disp.dialog_tracking = Some(super::super::dispatch::DialogTrackingState {
+            bounds,
+            game_managed: false,
+            draw_procs_done: true,
+            rendered_pixels: at_rest,
+            rendered_pixels_final: true,
+            filter_presentation_epoch: None,
+            items: vec![DialogItem {
+                item_type: 4,
+                rect: item_rect,
+                ..DialogItem::default()
+            }],
+            active_button: Some(super::super::dispatch::DialogButtonTrackingState {
+                mouse_down: super::super::dispatch::QueuedEvent {
+                    what: 1,
+                    message: 0,
+                    when: 0,
+                    where_v: 30,
+                    where_h: 35,
+                    modifiers: 0,
+                },
+                item_no: 1,
+                rect: item_rect,
+                title: String::new(),
+                is_default: false,
+                highlighted: true,
+                mark: None,
+            }),
+            ..Default::default()
+        });
+
+        disp.redraw_chrome(&mut bus);
+        assert_ne!(bus.read_byte(probe), 0x00, "a held button stays inverted after the snapshot is restored");
+
+        if let Some(button) = disp.dialog_tracking.as_mut().and_then(|tracking| tracking.active_button.as_mut()) {
+            button.highlighted = false;
+        }
+        disp.redraw_chrome(&mut bus);
+        assert_eq!(bus.read_byte(probe), 0x00, "with the pointer outside it the button is drawn at rest");
     }
 
     #[test]
