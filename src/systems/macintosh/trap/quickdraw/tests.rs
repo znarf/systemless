@@ -5829,6 +5829,24 @@
     }
 
     #[test]
+    fn charwidth_measures_text_size_zero_at_the_fonts_own_size() {
+        // IM:I (1985), p. I-153: txSize 0 selects the font's standard size.
+        let (mut d, mut cpu, mut bus) = setup();
+        let mut width_at = |size: i16| {
+            d.tx_size = size;
+            cpu.write_reg(Register::A7, TEST_SP);
+            bus.write_word(TEST_SP, b'W' as u16);
+            d.dispatch_quickdraw(true, 0x08D, &mut cpu, &mut bus)
+                .unwrap()
+                .unwrap();
+            bus.read_word(TEST_SP + 2) as i16
+        };
+        let standard = width_at(12);
+        assert!(standard > 1);
+        assert_eq!(width_at(0), standard);
+    }
+
+    #[test]
     fn charwidth_returns_pen_advance_for_drawchar_of_same_character() {
         // IM:I (1985), p. I-173: CharWidth reports the amount DrawChar adds to pen.h.
         let (mut d, mut cpu, mut bus) = setup_with_port();
