@@ -1096,6 +1096,21 @@ fn test_dispose_handle() {
 }
 
 #[test]
+fn dispose_handle_frees_a_block_whose_24_bit_master_pointer_carries_flags() {
+    // IM:II II-25: in 24-bit mode the master pointer's high byte holds the
+    // block's flags (an application may lock a handle by setting bit 7).
+    let (mut dispatcher, mut cpu, mut bus) = setup();
+    bus.set_addressing_32_bit(false);
+    let ptr = bus.alloc(4096);
+    let handle = bus.alloc(4);
+    bus.write_long(handle, ptr | 0x8000_0000);
+    cpu.write_reg(Register::A0, handle);
+    let result = dispatcher.dispatch_memory(false, 0x23, &mut cpu, &mut bus);
+    assert!(result.unwrap().is_ok());
+    assert_eq!(bus.get_alloc_size(ptr), None, "the block is freed");
+}
+
+#[test]
 fn dispose_resource_handle_preserves_resource_backing_for_later_lookup() {
     let (mut dispatcher, mut cpu, mut bus) = setup();
     let data_ptr = bus.alloc(4);

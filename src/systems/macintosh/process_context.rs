@@ -7063,7 +7063,9 @@ impl ProcessNativeMemoryManager {
         if handle == 0 {
             return;
         }
-        let ptr = bus.read_long(handle);
+        // In 24-bit mode a master pointer's high byte holds the block's
+        // flags (IM:II II-25); the block is at its low 24 bits.
+        let ptr = bus.translate_guest_address(bus.read_long(handle));
         if dispose_data {
             self.classic_allocator().free(ptr);
         }
