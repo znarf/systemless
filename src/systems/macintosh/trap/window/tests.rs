@@ -1305,6 +1305,40 @@ fn test_new_window() {
 }
 
 #[test]
+fn visible_new_window_behind_nil_with_no_other_window_is_activated() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let bounds_rect_ptr: u32 = 0x300000;
+    bus.write_word(bounds_rect_ptr, 40);
+    bus.write_word(bounds_rect_ptr + 2, 0);
+    bus.write_word(bounds_rect_ptr + 4, 342);
+    bus.write_word(bounds_rect_ptr + 6, 512);
+
+    let sp = TEST_SP - 26;
+    cpu.write_reg(Register::A7, sp);
+    for i in 0..30u32 {
+        bus.write_byte(sp + i, 0);
+    }
+    bus.write_long(sp + 6, 0); // behind = NIL
+    bus.write_byte(sp + 12, 1); // visible
+    bus.write_long(sp + 18, bounds_rect_ptr);
+
+    let result = dispatch(&mut disp, 0x113, &mut cpu, &mut bus);
+    assert!(result.unwrap().is_ok());
+
+    let window_ptr = bus.read_long(cpu.read_reg(Register::A7));
+    assert_eq!(disp.front_window, window_ptr);
+    assert_eq!(
+        bus.read_byte(window_ptr + super::super::TrapDispatcher::WINDOW_HILITED_OFFSET),
+        0xFF,
+        "the only window must be highlighted wherever it was asked to go"
+    );
+    assert_eq!(
+        bus.read_long(super::super::TrapDispatcher::LOWMEM_CUR_ACTIVATE),
+        window_ptr
+    );
+}
+
+#[test]
 fn full_screen_new_window_preserves_initial_update_event() {
     let (mut disp, mut cpu, mut bus) = setup();
     let screen_base = bus.alloc((800 * 600) as u32);

@@ -2949,7 +2949,11 @@ impl super::TrapDispatcher {
         behind: u32,
         old_front: u32,
     ) {
-        if behind == 0xFFFF_FFFF {
+        // A visible window created behind NIL is frontmost when no other
+        // window is, and is highlighted as one created in front.
+        let behind_nil_and_frontmost =
+            behind == 0 && visible && bus.read_long(Self::LOWMEM_WINDOW_LIST) == window_ptr;
+        if behind == 0xFFFF_FFFF || behind_nil_and_frontmost {
             // Native Mac OS 8.1 leaves activation unchanged for invisible
             // creations, despite the broader wording in Macintosh Toolbox
             // Essentials (1992), pp. 4-81 and 4-84. ShowWindow activates a
