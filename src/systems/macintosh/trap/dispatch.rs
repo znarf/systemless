@@ -2270,6 +2270,8 @@ pub struct TrapDispatcher {
     /// (IM:I I-418), and whether an alert is being created.
     pub(crate) alert_dialogs: HashSet<u32>,
     pub(crate) creating_alert: bool,
+    /// The text state (font, face, size) of the dialog being drawn.
+    pub(crate) dialog_text_state: std::cell::Cell<Option<(i16, u8, i16)>>,
     /// Control values for dialog items: (dialog_ptr, 1-based item_no) → value (0/1 for checkboxes)
     /// Inside Macintosh Volume I, I-327
     pub(crate) dialog_control_values: HashMap<(u32, i16), i16>,
@@ -4127,6 +4129,7 @@ impl TrapDispatcher {
             dialog_item_handles: HashMap::default(),
             alert_dialogs: HashSet::new(),
             creating_alert: false,
+            dialog_text_state: std::cell::Cell::new(None),
             dialog_control_values: HashMap::default(),
             dialog_control_handles: HashMap::default(),
             dialog_std_filter_proc: 0,
