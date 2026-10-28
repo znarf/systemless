@@ -58,7 +58,7 @@ pub struct FontFace {
     pub data: &'static [u8],
 }
 
-/// Glyph for a Mac Roman extended character (code 0x80..=0xFF).
+/// Glyph for a Mac Roman extended character (code 0x80..=0xFF), or a FONT's 0x7F.
 pub struct MacRomanGlyph {
     pub mac_code: u8,
     pub glyph: Glyph,
@@ -361,6 +361,18 @@ mod tests {
         assert_eq!(face.font_id, family_id);
         assert_eq!(face.size, 17);
         assert_eq!(face.metrics.ascent, 1);
+    }
+
+    #[test]
+    fn resource_strike_draws_its_delete_character() {
+        let family_id = 30002;
+        let mut nfnt = minimal_nfnt();
+        nfnt[2..4].copy_from_slice(&0x7Fu16.to_be_bytes()); // firstChar
+        nfnt[4..6].copy_from_slice(&0x7Fu16.to_be_bytes()); // lastChar
+        assert!(register_resource_font_strike_for_family(family_id, 12, &nfnt));
+        let (glyph, _) = crate::quickdraw::text::get_glyph(family_id, 12, '\u{7F}')
+            .expect("a FONT that defines 0x7F should draw it");
+        assert_eq!((glyph.width, glyph.advance), (1, 1));
     }
 
     fn distinctive_override_blob(font_id: i16, size: i16) -> override_format::Blob {
