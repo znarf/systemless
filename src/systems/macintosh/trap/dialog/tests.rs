@@ -12558,6 +12558,30 @@
         );
     }
 
+    // Startside's patch: dBoxProc's frame as System 6 and 7.1 draw it, the same on every side: a one-pixel edge
+    // eight pixels out, two white, a two-pixel band, three white to the content.
+    #[test]
+    fn classic_dbox_frame_is_the_same_on_every_side() {
+        let (disp, _cpu, mut bus) = setup();
+        let mut disp = disp;
+        let screen_base = 0x300000u32;
+        let row_bytes = 64u32;
+        disp.set_screen_mode_for_test(screen_base, row_bytes, 512, 342, 1);
+        let (top, left, bottom, right) = (100i16, 100i16, 200i16, 300i16);
+        disp.draw_classic_dbox_frame(&mut bus, top, left, bottom, right);
+        let along_row = |bus: &MacMemoryBus, x: i16| screen_pixel_is_set(bus, screen_base, row_bytes, x, 150);
+        let along_col = |bus: &MacMemoryBus, y: i16| screen_pixel_is_set(bus, screen_base, row_bytes, 200, y);
+        // Out from the content: 3 white, 2 black, 2 white, 1 black.
+        let expected = [false, false, false, true, true, false, false, true];
+        for (i, &black) in expected.iter().enumerate() {
+            let d = i as i16;
+            assert_eq!(along_row(&bus, left - 1 - d), black, "left, {} out", d + 1);
+            assert_eq!(along_row(&bus, right + d), black, "right, {} out", d + 1);
+            assert_eq!(along_col(&bus, top - 1 - d), black, "top, {} out", d + 1);
+            assert_eq!(along_col(&bus, bottom + d), black, "bottom, {} out", d + 1);
+        }
+    }
+
     // Startside's patch: ModalDialog tracks a checkbox held down as TrackControl does (IM I-323, I-415): its box
     // drawn two pixels thick while the pointer is inside, back to normal outside, and the item returned only when
     // the button comes up inside it.

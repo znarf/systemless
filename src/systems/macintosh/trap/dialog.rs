@@ -7658,20 +7658,19 @@ impl super::TrapDispatcher {
             (top, left, bottom, right),
         );
 
-        // System 7.5.3's standard WDEF draws an asymmetric black structure
-        // edge: one pixel on top/left and a two-pixel shadow edge on
-        // bottom/right, with a two-pixel inner band inset from the outer edge.
+        // Startside's patch: System 6's and 7.1's dBoxProc, as the user's System 7.1 screenshots show it: a
+        // one-pixel black edge eight pixels out on every side, two white, then a two-pixel band, then three white to
+        // the content. It was System 7.5.3's asymmetric frame (a two-pixel shadow edge and a one-pixel band on the
+        // bottom and right).
         self.fill_dialog_rect(bus, top - 8, left - 8, top - 7, right + 8, true);
+        self.fill_dialog_rect(bus, bottom + 7, left - 8, bottom + 8, right + 8, true);
         self.fill_dialog_rect(bus, top - 8, left - 8, bottom + 8, left - 7, true);
-        self.fill_dialog_rect(bus, top - 8, right + 6, bottom + 8, right + 8, true);
-        self.fill_dialog_rect(bus, bottom + 6, left - 8, bottom + 8, right + 8, true);
+        self.fill_dialog_rect(bus, top - 8, right + 7, bottom + 8, right + 8, true);
 
-        self.fill_dialog_rect(bus, top - 5, left - 5, top - 4, right + 5, true);
-        self.fill_dialog_rect(bus, top - 4, left - 5, top - 3, right + 4, true);
-        self.fill_dialog_rect(bus, top - 5, left - 5, bottom + 5, left - 4, true);
-        self.fill_dialog_rect(bus, top - 5, left - 4, bottom + 4, left - 3, true);
-        self.fill_dialog_rect(bus, top - 5, right + 3, bottom + 4, right + 4, true);
-        self.fill_dialog_rect(bus, bottom + 3, left - 5, bottom + 4, right + 4, true);
+        self.fill_dialog_rect(bus, top - 5, left - 5, top - 3, right + 5, true);
+        self.fill_dialog_rect(bus, bottom + 3, left - 5, bottom + 5, right + 5, true);
+        self.fill_dialog_rect(bus, top - 5, left - 5, bottom + 5, left - 3, true);
+        self.fill_dialog_rect(bus, top - 5, right + 3, bottom + 5, right + 5, true);
     }
 
     /// Draw a 2-pixel shadow on bottom and right edges.
