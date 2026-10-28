@@ -2266,6 +2266,10 @@ pub struct TrapDispatcher {
     pub(crate) hidden_dialog_item_rects: HashMap<(u32, i16), (i16, i16, i16, i16)>,
     /// Maps guest handle address → (dialog_ptr, 0-based item index) for SetDialogItemText
     pub(crate) dialog_item_handles: FastHashMap<u32, (u32, usize)>,
+    /// Alert windows, whose default button the Dialog Manager outlines
+    /// (IM:I I-418), and whether an alert is being created.
+    pub(crate) alert_dialogs: HashSet<u32>,
+    pub(crate) creating_alert: bool,
     /// Control values for dialog items: (dialog_ptr, 1-based item_no) → value (0/1 for checkboxes)
     /// Inside Macintosh Volume I, I-327
     pub(crate) dialog_control_values: HashMap<(u32, i16), i16>,
@@ -4121,6 +4125,8 @@ impl TrapDispatcher {
             dialog_items: HashMap::default(),
             hidden_dialog_item_rects: HashMap::default(),
             dialog_item_handles: HashMap::default(),
+            alert_dialogs: HashSet::new(),
+            creating_alert: false,
             dialog_control_values: HashMap::default(),
             dialog_control_handles: HashMap::default(),
             dialog_std_filter_proc: 0,

@@ -9431,8 +9431,9 @@
     #[test]
     fn draw_dialog_and_retained_redraw_outline_default_button() {
         // DialogRecord.aDefItem identifies the standard push button that
-        // receives Return/Enter. Initial and retained composition must render
-        // its default outline after the standard button itself.
+        // receives Return/Enter. Initial and retained composition of an alert
+        // must render its default outline after the standard button itself
+        // (IM:I I-418); in a dialog the application draws it (I-407).
         let screen_base = 0x300000u32;
         let row_bytes = 64u32;
         let bounds = (40, 40, 120, 220);
@@ -9448,8 +9449,18 @@
 
         disp.draw_dialog(&mut bus, bounds, 1, "", &items, 1, "", 0, false, dialog_ptr);
         assert!(
+            !screen_pixel_is_set(&bus, screen_base, row_bytes, 56, 70),
+            "a dialog's default button gets no outline from the Dialog Manager"
+        );
+        for offset in 0..row_bytes * 342 {
+            bus.write_byte(screen_base + offset, 0);
+        }
+
+        disp.alert_dialogs.insert(dialog_ptr);
+        disp.draw_dialog(&mut bus, bounds, 1, "", &items, 1, "", 0, false, dialog_ptr);
+        assert!(
             screen_pixel_is_set(&bus, screen_base, row_bytes, 56, 70),
-            "DrawDialog should outline the aDefItem button"
+            "DrawDialog should outline an alert's aDefItem button"
         );
 
         for offset in 0..row_bytes * 342 {

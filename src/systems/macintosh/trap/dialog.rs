@@ -4039,6 +4039,7 @@ impl super::TrapDispatcher {
             Self::duplicate_handle_data(bus, handle)
         };
         let bounds = self.positioned_window_bounds(bus, bounds, position, 1);
+        self.creating_alert = true;
         let dialog_ptr = self.finish_dialog_creation(
             bus,
             cpu,
@@ -4055,9 +4056,11 @@ impl super::TrapDispatcher {
             None,
             false,
         );
+        self.creating_alert = false;
         if dialog_ptr == 0 {
             return false;
         }
+        self.alert_dialogs.insert(dialog_ptr);
         let cancel_item = crate::dialog_manager::evaluate_dialog_cancel_item(
             None,
             items.iter().map(|item| (item.item_type, &item.text)),
@@ -6560,10 +6563,10 @@ impl super::TrapDispatcher {
             );
         }
 
-        // aDefItem is authoritative for both Return/Enter semantics and the
-        // standard button's default chrome. Drawing that chrome here keeps
-        // the initial dialog shell coherent before application userItems run.
-        let auto_default_outline = true;
+        // aDefItem is authoritative for Return/Enter semantics; the bold
+        // outline is the Dialog Manager's only for alerts (IM:I I-418), an
+        // application draws its own dialogs' (I-407).
+        let auto_default_outline = self.dialog_outlines_default_button(dialog_ptr);
 
         // Draw each item
         for (i, item) in items.iter().enumerate() {
@@ -6942,6 +6945,13 @@ impl super::TrapDispatcher {
         self.capture_gui_frame(bus, &format!("draw_dialog_{:08X}", dialog_ptr));
     }
 
+    /// The Dialog Manager draws the bold outline around the default button
+    /// of an alert (IM:I I-418); a dialog's is the application's to draw
+    /// (I-407).
+    fn dialog_outlines_default_button(&self, dialog_ptr: u32) -> bool {
+        self.creating_alert || self.alert_dialogs.contains(&dialog_ptr)
+    }
+
     fn redraw_standard_dialog_items(
         &self,
         bus: &mut MacMemoryBus,
@@ -6956,8 +6966,8 @@ impl super::TrapDispatcher {
         let (top, left, _bottom, _right) = bounds;
         // Apply default chrome after restoring guest-owned pixels and
         // redrawing live standard controls so retained composition cannot
-        // drop the aDefItem outline.
-        let auto_default_outline = true;
+        // drop an alert's aDefItem outline.
+        let auto_default_outline = self.dialog_outlines_default_button(dialog_ptr);
         // Redraw text items, which erase their rects, before controls, as
         // DrawDialog draws controls after the other items (IM:I I-418):
         // static text whose rect runs under a button or an icon must not
@@ -9800,6 +9810,7 @@ impl super::TrapDispatcher {
         if dialog_ptr == 0 {
             return;
         }
+        self.alert_dialogs.remove(&dialog_ptr);
         let retained_modal_is_logical_front = self.dialog_modal_entered.contains(&dialog_ptr)
             && self
                 .window_stack
@@ -10320,10 +10331,11 @@ impl super::TrapDispatcher {
                 let is_disabled = is_dialog_item_disabled(item.item_type);
                 if base_type == DIALOG_ITEM_BUTTON && !is_disabled {
                     let rect = Self::dialog_item_screen_rect(bounds, item.rect);
-                    let is_default = hit
-                        == bus.read_word(
-                            dialog_ptr + crate::dialog_manager::DIALOG_DEFAULT_ITEM_OFFSET,
-                        ) as i16;
+                    let is_default = self.dialog_outlines_default_button(dialog_ptr)
+                        && hit
+                            == bus.read_word(
+                                dialog_ptr + crate::dialog_manager::DIALOG_DEFAULT_ITEM_OFFSET,
+                            ) as i16;
                     self.draw_dialog_button_highlight_state(
                         bus, rect, &item.text, is_default, true,
                     );
@@ -12464,6 +12476,9 @@ impl super::TrapDispatcher {
                     if flash_remaining > 0 {
                         // Button flash animation
                         let flash_item = self.dialog_tracking.as_ref().unwrap().flash_item;
+                        let outlines_default = self.dialog_outlines_default_button(
+                            self.dialog_tracking.as_ref().unwrap().dialog_ptr,
+                        );
                         let (remaining, button_draw) = {
                             let t = self.dialog_tracking.as_mut().unwrap();
                             if t.flash_delay > 0 {
@@ -12481,7 +12496,7 @@ impl super::TrapDispatcher {
                                 Some((
                                     Self::dialog_item_screen_rect(bounds, item.rect),
                                     item.text.clone(),
-                                    flash_item == t.default_item,
+                                    outlines_default && flash_item == t.default_item,
                                     remaining % 2 == 0,
                                 ))
                             } else {
@@ -12681,12 +12696,14 @@ impl super::TrapDispatcher {
                                                     Self::dialog_item_screen_rect(
                                                         bounds, item.rect,
                                                     );
-                                                let is_default = hit
-                                                    == self
-                                                        .dialog_tracking
-                                                        .as_ref()
-                                                        .map(|tracking| tracking.default_item)
-                                                        .unwrap_or(0);
+                                                let is_default = self
+                                                    .dialog_outlines_default_button(dialog_ptr)
+                                                    && hit
+                                                        == self
+                                                            .dialog_tracking
+                                                            .as_ref()
+                                                            .map(|tracking| tracking.default_item)
+                                                            .unwrap_or(0);
                                                 self.draw_dialog_button_highlight_state(
                                                     bus,
                                                     (abs_top, abs_left, abs_bottom, abs_right),
@@ -13001,7 +13018,9 @@ impl super::TrapDispatcher {
                                                             cancel,
                                                             item.rect,
                                                             item.text.clone(),
-                                                            crate::dialog_manager::is_dialog_default_button(
+                                                            self.dialog_outlines_default_button(
+                                                                tracking.dialog_ptr,
+                                                            ) && crate::dialog_manager::is_dialog_default_button(
                                                                 cancel,
                                                                 tracking.default_item,
                                                             ),
