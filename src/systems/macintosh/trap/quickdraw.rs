@@ -608,6 +608,9 @@ impl super::TrapDispatcher {
             let port = *self.current_port;
             self.load_port_draw_state(bus, port);
         }
+        if is_tool {
+            self.load_port_text_state(bus);
+        }
         Some(match (is_tool, trap_num) {
             // ========== QuickDraw Initialization ==========
 
@@ -19530,6 +19533,22 @@ impl super::TrapDispatcher {
         self.tx_mode = bus.read_word(port + 72) as i16;
         self.tx_size = bus.read_word(port + 74) as i16;
         true
+    }
+
+    /// The port's txFont, txFace, txMode and txSize are its text state
+    /// (Inside Macintosh Volume I, I-152); applications may store them
+    /// directly instead of calling TextFont and its neighbours. Read them
+    /// before a trap so text is drawn and measured in them, and so the
+    /// trap's write-back keeps them.
+    fn load_port_text_state(&mut self, bus: &MacMemoryBus) {
+        let port = *self.current_port;
+        if port == 0 || !self.port_allows_draw_state_memory_sync(bus, port) {
+            return;
+        }
+        self.tx_font = bus.read_word(port + 68) as i16;
+        self.tx_face = decode_text_face_style(bus.read_word(port + 70));
+        self.tx_mode = bus.read_word(port + 72) as i16;
+        self.tx_size = bus.read_word(port + 74) as i16;
     }
 
     fn copy_bits_port_draw_colors(&self, bus: &MacMemoryBus, port: u32) -> ([u16; 3], [u16; 3]) {

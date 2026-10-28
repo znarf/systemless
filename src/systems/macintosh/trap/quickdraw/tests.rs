@@ -5847,6 +5847,45 @@
     }
 
     #[test]
+    fn text_traps_use_text_fields_stored_in_the_port() {
+        // IM:I (1985), p. I-152: the GrafPort's txFont..txSize are the text
+        // state; an application may store them without the setter traps.
+        let (mut d, mut cpu, mut bus) = setup_with_port();
+        let port = 0x181000u32;
+        d.set_current_port_for_test(port);
+        let mut width_with_port_size = |size: u16| {
+            bus.write_word(port + 74, size);
+            cpu.write_reg(Register::A7, TEST_SP);
+            bus.write_word(TEST_SP, b'W' as u16);
+            d.dispatch_quickdraw(true, 0x08D, &mut cpu, &mut bus)
+                .unwrap()
+                .unwrap();
+            bus.read_word(TEST_SP + 2) as i16
+        };
+        let at_12 = width_with_port_size(12);
+        let at_24 = width_with_port_size(24);
+        assert!(at_24 > at_12 * 3 / 2, "{at_12} at 12 points, {at_24} at 24");
+    }
+
+    #[test]
+    fn traps_keep_text_fields_stored_in_the_port() {
+        let (mut d, mut cpu, mut bus) = setup_with_port();
+        let port = 0x181000u32;
+        d.set_current_port_for_test(port);
+        bus.write_word(port + 68, 4); // txFont
+        bus.write_word(port + 70, 0x0900); // txFace: bold, outline
+        bus.write_word(port + 74, 9); // txSize
+        bus.write_word(TEST_SP, 10); // PenMode(patXor)
+        d.dispatch_quickdraw(true, 0x09C, &mut cpu, &mut bus)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bus.read_word(port + 56), 10);
+        assert_eq!(bus.read_word(port + 68), 4);
+        assert_eq!(bus.read_word(port + 70), 0x0900);
+        assert_eq!(bus.read_word(port + 74), 9);
+    }
+
+    #[test]
     fn charwidth_returns_pen_advance_for_drawchar_of_same_character() {
         // IM:I (1985), p. I-173: CharWidth reports the amount DrawChar adds to pen.h.
         let (mut d, mut cpu, mut bus) = setup_with_port();
