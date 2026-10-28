@@ -3080,6 +3080,25 @@ impl TrapDispatcher {
         256u32.saturating_add(pixels.saturating_mul(per_pixel))
     }
 
+    /// Startside's patch: the time a FrameRect, PaintRect, EraseRect, InvertRect or FillRect takes, as the blits'
+    /// cost above (the call, then the pixels it covers, eight a step as a 1-bit fill writes them). They cost a
+    /// trap's 4 before: SimCity's zoning tools draw and erase their square with patXor FrameRects in a loop that ran
+    /// some 800 times a tick, each draw host work, 6 frames a second while the pointer was over the map.
+    pub(crate) fn shape_rect_tick_cost(width: u32, height: u32, frame_pen: Option<(u32, u32)>) -> u32 {
+        if width == 0 || height == 0 {
+            return 0;
+        }
+        let pixels = match frame_pen {
+            Some((pen_h, pen_w)) => {
+                let rows = pen_h.min(height / 2 + 1).saturating_mul(2).min(height);
+                let cols = pen_w.min(width / 2 + 1).saturating_mul(2).min(width);
+                rows.saturating_mul(width).saturating_add(cols.saturating_mul(height - rows))
+            }
+            None => width.saturating_mul(height),
+        };
+        256u32.saturating_add(pixels / 8)
+    }
+
     pub(crate) fn draw_picture_tick_cost(width: u32, height: u32, picture_bytes: u32) -> u32 {
         let pixels = width.saturating_mul(height);
         if pixels == 0 && picture_bytes == 0 {

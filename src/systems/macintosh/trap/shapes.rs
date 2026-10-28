@@ -648,6 +648,14 @@ impl super::TrapDispatcher {
             }
         }
         let (pen_h, pen_w) = self.pn_size;
+        // Startside's patch: a rectangle drawn costs the processor time QuickDraw takes for it
+        // (`shape_rect_tick_cost`), not a trap's.
+        if self.pn_vis >= 0 && !matches!(op, ShapeOp::Glyph(_)) {
+            let width = (i32::from(r.right) - i32::from(r.left)).max(0) as u32;
+            let height = (i32::from(r.bottom) - i32::from(r.top)).max(0) as u32;
+            let frame_pen = matches!(op, ShapeOp::Frame).then(|| (pen_h.max(0) as u32, pen_w.max(0) as u32));
+            self.add_hle_tick_cost(Self::shape_rect_tick_cost(width, height, frame_pen));
+        }
         self.draw_generic_shape(cpu, bus, r, op, true, |y, x| {
             if y < r.top || y >= r.bottom || x < r.left || x >= r.right {
                 return 0;

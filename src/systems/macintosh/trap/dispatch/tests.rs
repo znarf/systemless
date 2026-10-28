@@ -2429,6 +2429,18 @@
         assert!(picture > large_blit);
     }
 
+    /// Startside's patch: a rectangle drawn costs its call and the pixels it covers, a frame only its edges.
+    #[test]
+    fn shape_rect_tick_cost_counts_the_call_and_the_pixels_covered() {
+        // SimCity's zoning square: 48 x 48, framed with a 2 x 2 pen (2 x 48 x 2 + 2 x 44 x 2 = 368 pixels).
+        assert_eq!(TrapDispatcher::shape_rect_tick_cost(48, 48, Some((2, 2))), 256 + 368 / 8);
+        assert_eq!(TrapDispatcher::shape_rect_tick_cost(48, 48, None), 256 + 48 * 48 / 8);
+        // A pen wider than half the rectangle fills it, never more.
+        assert_eq!(TrapDispatcher::shape_rect_tick_cost(10, 6, Some((8, 8))), 256 + 60 / 8);
+        assert_eq!(TrapDispatcher::shape_rect_tick_cost(0, 20, None), 0);
+        assert!(TrapDispatcher::shape_rect_tick_cost(512, 342, None) > TrapDispatcher::shape_rect_tick_cost(512, 342, Some((1, 1))));
+    }
+
     fn install_menu_tracking(disp: &mut TrapDispatcher) {
         disp.menu_tracking
             .set(Some(test_tracked_menu_state(0, (0, 0, 0, 0), 0)));
