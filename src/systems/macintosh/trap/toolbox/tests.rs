@@ -12885,6 +12885,7 @@ fn sf_get_file_gui_dialog_opens_at_its_where_point() {
 
     assert!(disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().is_ok());
     assert_eq!(disp.standard_file_get_tracking.as_ref().unwrap().bounds, (70, 112, 236, 456));
+    assert!(disp.menu_bar_dimmed_for_dialog(), "the menu titles are dimmed while the dialog is up");
 }
 
 // Startside's patch: SFPutFile's dialog at its `where` (SP+18), Save pressable only once a name is typed (it is

@@ -3346,6 +3346,12 @@ impl super::TrapDispatcher {
     /// Draw the menu bar at the top of the screen.
     /// Height is read from the MBarHeight low-memory global ($0BAA).
     /// If MBarHeight is 0, the menu bar is hidden (full-screen mode).
+    /// Startside's patch: every menu title is drawn dimmed, none highlighted, while Standard File's dialog is up
+    /// (System 7.1's look: its menus can't be used meanwhile).
+    pub(crate) fn menu_bar_dimmed_for_dialog(&self) -> bool {
+        self.standard_file_put_tracking.is_some() || self.standard_file_get_tracking.is_some()
+    }
+
     pub(crate) fn draw_menu_bar_to_fb(&self, bus: &mut MacMemoryBus) {
         if self.fullscreen_locked || self.menu_bar_hidden {
             return;
@@ -3368,10 +3374,10 @@ impl super::TrapDispatcher {
                 .filter_map(|(i, region)| {
                     self.menus
                         .get(i)
-                        .map(|menu| (menu.id, menu.title.clone(), menu.enabled, region))
+                        .map(|menu| (menu.id, menu.title.clone(), menu.enabled && !self.menu_bar_dimmed_for_dialog(), region))
                 })
                 .collect(),
-            highlighted: self.current_menu_bar_highlight_index(bus),
+            highlighted: self.current_menu_bar_highlight_index(bus).filter(|_| !self.menu_bar_dimmed_for_dialog()),
             outline_scale: bus.outline_presentation_scale(),
         });
         // A palette change alone need not invalidate the cached bar: replay
@@ -3553,7 +3559,7 @@ impl super::TrapDispatcher {
                 region.left,
                 menu_bar_height - 1,
                 region.right,
-                menu.enabled,
+                menu.enabled && !self.menu_bar_dimmed_for_dialog(),
                 false,
             );
             let title_index = Self::menu_title_pixel_index(bus, menu.id, pixel_size);
@@ -3564,7 +3570,8 @@ impl super::TrapDispatcher {
             // p. V-142) and draws solid grey glyphs; a device with no
             // intermediate shade gets the title drawn and then knocked back
             // with the 50% grey pattern.
-            let dim_title = self.ui_theme_id() == UiThemeId::ClassicSystem7 && !menu.enabled;
+            let dim_title = self.ui_theme_id() == UiThemeId::ClassicSystem7
+                && (!menu.enabled || self.menu_bar_dimmed_for_dialog());
             let dim_index = if dim_title {
                 Self::menu_dim_pixel_index(bus, pixel_size, title_index, title_bg_index)
             } else {
@@ -3635,7 +3642,10 @@ impl super::TrapDispatcher {
             }
         }
 
-        if let Some(menu_idx) = self.current_menu_bar_highlight_index(bus) {
+        if let Some(menu_idx) = self
+            .current_menu_bar_highlight_index(bus)
+            .filter(|_| !self.menu_bar_dimmed_for_dialog())
+        {
             self.highlight_menu_title(bus, menu_idx);
         }
 

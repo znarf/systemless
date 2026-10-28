@@ -2687,6 +2687,8 @@ impl super::TrapDispatcher {
         };
         self.draw_standard_file_get_dialog(bus, &tracking);
         self.standard_file_get_tracking = Some(tracking);
+        // Startside's patch: the menu bar dimmed while the dialog is up (`menu_bar_dimmed_for_dialog`).
+        self.draw_menu_bar_to_fb(bus);
     }
 
     fn service_standard_file_get_tracking<C: CpuOps>(
@@ -2814,6 +2816,8 @@ impl super::TrapDispatcher {
         accepted: bool,
     ) {
         self.restore_dialog_pixels(bus, tracking.bounds, &tracking.saved_pixels);
+        // Startside's patch: the menu bar back as it was.
+        self.draw_menu_bar_to_fb(bus);
         if accepted {
             if let Some(selection) = tracking.entries.get(tracking.selected) {
                 if tracking.modern_reply {
@@ -3348,6 +3352,8 @@ impl super::TrapDispatcher {
         };
         self.draw_standard_file_put_dialog(bus, &tracking);
         self.standard_file_put_tracking = Some(tracking);
+        // Startside's patch: the menu bar dimmed while the dialog is up (`menu_bar_dimmed_for_dialog`).
+        self.draw_menu_bar_to_fb(bus);
     }
 
     fn service_standard_file_put_tracking<C: CpuOps>(
@@ -3490,6 +3496,8 @@ impl super::TrapDispatcher {
         accepted: bool,
     ) {
         self.restore_dialog_pixels(bus, tracking.bounds, &tracking.saved_pixels);
+        // Startside's patch: the menu bar back as it was.
+        self.draw_menu_bar_to_fb(bus);
         let (vref, dir_id, _, writable) =
             self.standard_file_put_directory_location(tracking.current_dir_id);
         let wd_ref = self.persist_standard_file_directory(bus, vref, dir_id);
