@@ -9159,12 +9159,13 @@ impl super::TrapDispatcher {
                                 start,
                             )
                     };
-                    let selection_right = if end >= text_bytes.len() {
-                        right
-                    } else {
-                        left + Self::TE_LINE_LEFT_INSET
-                            + self.te_measure_text_width(font_id, font_size, &text_bytes, 0, end)
-                    };
+                    // Startside's patch: up to the last selected character, the text's end included, as
+                    // TextEdit's own highlight above does (IM I-375): a whole name selected was inverted to the
+                    // field's right edge (SimCity's Save City As, the user's screenshot).
+                    let selection_right = (left
+                        + Self::TE_LINE_LEFT_INSET
+                        + self.te_measure_text_width(font_id, font_size, &text_bytes, 0, end))
+                    .min(right);
                     if selection_left < selection_right && selection_top < selection_bottom {
                         if self.ui_theme_id() == UiThemeId::ClassicSystem7 {
                             self.invert_rect_exact(

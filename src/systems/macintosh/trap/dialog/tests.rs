@@ -12652,6 +12652,25 @@
         }
     }
 
+    // Startside's patch: an editText selection reaching the text's end is inverted up to its last character, not to
+    // the field's right edge (TextEdit's highlight; the user's SimCity Save City As with "SomeWhere" selected).
+    #[test]
+    fn edit_text_selection_ends_at_the_last_selected_character() {
+        let (mut disp, _cpu, mut bus) = setup();
+        let screen_base = 0x300000u32;
+        let row_bytes = 64u32;
+        disp.set_screen_mode_for_test(screen_base, row_bytes, 512, 342, 1);
+        let (top, left, bottom, right) = (100i16, 50i16, 116i16, 262i16);
+        disp.draw_edit_text(&mut bus, top, left, bottom, right, "SomeWhere", true);
+        let row = top + 8;
+        let ink = |bus: &MacMemoryBus, x: i16| screen_pixel_is_set(bus, screen_base, row_bytes, x, row);
+        assert!(ink(&bus, left), "the highlight starts at the field's left");
+        // Past the text, the field is white to its right edge.
+        let text_end = (left..right).rev().find(|&x| ink(&bus, x)).expect("a highlight");
+        assert!(text_end < left + 90, "the highlight stops after the text (it ran to {text_end})");
+        assert!(!ink(&bus, right - 2));
+    }
+
     // Startside's patch: ModalDialog tracks a checkbox held down as TrackControl does (IM I-323, I-415): its box
     // drawn two pixels thick while the pointer is inside, back to normal outside, and the item returned only when
     // the button comes up inside it.
