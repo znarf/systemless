@@ -2474,7 +2474,9 @@ fn infoscrap_reports_in_memory_scrapstate_and_entry_size() {
     assert_eq!(bus.get_alloc_size(scrap_ptr), Some(12));
     assert_eq!(bus.read_word(scrap_info + 8), 1); // scrapCount after first ZeroScrap
     assert_eq!(bus.read_word(scrap_info + 10), 1); // positive = in memory (IM:I I-457)
-    assert_eq!(bus.read_long(scrap_info + 12), 0); // scrapName = NIL in HLE
+    let scrap_name = bus.read_long(scrap_info + 12);
+    assert_ne!(scrap_name, 0);
+    assert_eq!(bus.read_pstring(scrap_name), b"Clipboard File".to_vec());
 }
 
 // Inside Macintosh Volume I, I-457: ScrapHandle is a handle to the desk
@@ -2746,6 +2748,70 @@ fn getscrap_existing_handle_resizes_copy_and_preserves_ownership() {
 
 // Inside Macintosh Volume I, I-458: UnloadScrap/LoadScrap return noErr on
 // success and the ScrapStuff record reflects the resident/on-disk state.
+// Inside Macintosh Volume I, I-457 to I-458: UnloadScrap writes the desk
+// scrap to the file scrapName names; while it is on disk that file is the
+// scrap, which an application may write itself (MacPaint 1.x writes its
+// PICT there) and GetScrap and LoadScrap read back.
+#[test]
+fn unloaded_desk_scrap_lives_in_its_file() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let sp = TEST_SP;
+    disp.scrap.set_clipboard_writable(false);
+    let call = |disp: &mut TrapDispatcher, cpu: &mut MockCpu, bus: &mut MacMemoryBus, trap| {
+        cpu.write_reg(Register::A7, sp);
+        assert!(disp.dispatch_toolbox(true, trap, cpu, bus).unwrap().is_ok());
+    };
+
+    bus.write_long(sp, 0);
+    call(&mut disp, &mut cpu, &mut bus, 0x1FC); // ZeroScrap
+    let source = bus.alloc(3);
+    bus.write_bytes(source, b"ABC");
+    bus.write_long(sp, source);
+    bus.write_long(sp + 4, u32::from_be_bytes(*b"TEXT"));
+    bus.write_long(sp + 8, 3);
+    call(&mut disp, &mut cpu, &mut bus, 0x1FE); // PutScrap
+    bus.write_long(sp, 0xDEAD_BEEF);
+    call(&mut disp, &mut cpu, &mut bus, 0x1FA); // UnloadScrap
+    assert_eq!(bus.read_long(sp), 0, "noErr");
+    let file = disp.find_vfs_file("Clipboard File").expect("the scrap file");
+    let mut expected = b"TEXT".to_vec();
+    expected.extend_from_slice(&3u32.to_be_bytes());
+    expected.extend_from_slice(b"ABC\0");
+    assert_eq!(disp.vfs.get(&file), Some(&expected));
+
+    // The application replaces the file's contents with a picture.
+    let mut picture = b"PICT".to_vec();
+    picture.extend_from_slice(&4u32.to_be_bytes());
+    picture.extend_from_slice(&[0, 4, 1, 2]);
+    disp.vfs.insert(file, picture);
+
+    let offset_ptr = bus.alloc(4);
+    bus.write_long(sp, offset_ptr);
+    bus.write_long(sp + 4, u32::from_be_bytes(*b"PICT"));
+    bus.write_long(sp + 8, 0); // hDest NIL: length and offset only
+    call(&mut disp, &mut cpu, &mut bus, 0x1FD); // GetScrap
+    assert_eq!(bus.read_long(sp + 12), 4);
+    assert_eq!(bus.read_long(offset_ptr), 8, "the data follows its type and length");
+
+    bus.write_long(sp, 0);
+    call(&mut disp, &mut cpu, &mut bus, 0x1F9); // InfoScrap
+    let info = bus.read_long(sp);
+    assert_eq!(bus.read_word(info + 10), 0, "on disk");
+    assert_eq!(bus.read_long(info), 12);
+
+    bus.write_long(sp, 0xDEAD_BEEF);
+    call(&mut disp, &mut cpu, &mut bus, 0x1FB); // LoadScrap
+    assert_eq!(bus.read_long(sp), 0);
+    let handle = bus.alloc(4);
+    bus.write_long(handle, 0);
+    bus.write_long(sp, offset_ptr);
+    bus.write_long(sp + 4, u32::from_be_bytes(*b"PICT"));
+    bus.write_long(sp + 8, handle);
+    call(&mut disp, &mut cpu, &mut bus, 0x1FD); // GetScrap
+    assert_eq!(bus.read_long(sp + 12), 4);
+    assert_eq!(bus.read_bytes(bus.read_long(handle), 4), vec![0, 4, 1, 2]);
+}
+
 #[test]
 fn unloadscrap_and_loadscrap_return_noerr() {
     let (mut disp, mut cpu, mut bus) = setup();
@@ -2832,6 +2898,14 @@ fn unloadscrap_returns_error_and_keeps_scrap_resident_when_clipboard_unwritable(
     let sp = TEST_SP;
 
     disp.scrap.set_clipboard_writable(false);
+    let volume_ref =
+        disp.mount_vfs_volume("Locked", 0x0080, 1, 1024, 512, 512, 900, 0, 0, 0, 0, 0, 0);
+    let root_dir_id = disp
+        .vfs_volume_for_ref_num(volume_ref)
+        .expect("mounted volume")
+        .root_dir_id;
+    disp.default_dir_id
+        .with_mut(|default_dir_id| *default_dir_id = root_dir_id);
 
     bus.write_long(sp, 0);
     let zero = disp.dispatch_toolbox(true, 0x1FC, &mut cpu, &mut bus);

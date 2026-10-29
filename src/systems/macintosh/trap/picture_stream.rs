@@ -205,6 +205,156 @@ impl TrapDispatcher {
     }
 }
 
+/// A closed picture's definition on its way to an application's putPicProc.
+#[derive(Clone, Debug)]
+pub(crate) struct PicturePutFrame {
+    caller_sp: u32,
+    caller_pc: u32,
+    callback: u32,
+    buffer: u32,
+    return_gate: u32,
+    bytes: Vec<u8>,
+    sent: usize,
+}
+
+impl TrapDispatcher {
+    /// The current port's putPicProc, when the application replaced
+    /// StdPutPic in its grafProcs.
+    pub(super) fn custom_put_pic_proc<C: CpuOps>(
+        &self,
+        cpu: &C,
+        bus: &MacMemoryBus,
+    ) -> Option<u32> {
+        let a5 = cpu.read_reg(Register::A5);
+        if !bus.is_guest_address_mapped(a5, 4) {
+            return None;
+        }
+        let globals = bus.read_long(a5);
+        if !bus.is_guest_address_mapped(globals, 4) {
+            return None;
+        }
+        let port = bus.read_long(globals);
+        if !bus.is_guest_address_mapped(port, 108) {
+            return None;
+        }
+        let procs = bus.read_long(port + 104);
+        if procs == 0 || !bus.is_guest_address_mapped(procs, 52) {
+            return None;
+        }
+        let callback = bus.read_long(procs + 48);
+        (callback != 0 && bus.system_trap_gateway(0xa8f0) != Some(callback)).then_some(callback)
+    }
+
+    /// Hand a picture's definition, after its size and frame, to the
+    /// application's putPicProc, which QuickDraw calls with the picture's
+    /// bytes as it records them (Inside Macintosh I-197 to I-198). Returns
+    /// whether a call was scheduled; ClosePicture returns once all are made.
+    pub(super) fn begin_picture_put<C: CpuOps>(
+        &mut self,
+        cpu: &mut C,
+        bus: &mut MacMemoryBus,
+        callback: u32,
+        bytes: Vec<u8>,
+    ) -> bool {
+        if self.picture_put.is_some() || bytes.is_empty() {
+            return false;
+        }
+        let buffer = bus.alloc(MAX_READ as u32);
+        let return_gate = bus.alloc(2);
+        if buffer == 0 || return_gate == 0 {
+            if buffer != 0 {
+                bus.free(buffer);
+            }
+            if return_gate != 0 {
+                bus.free(return_gate);
+            }
+            return false;
+        }
+        // Only the registered PC/SP pair resumes this ClosePicture.
+        bus.write_word(return_gate, 0xa8f4);
+        self.picture_put = Some(PicturePutFrame {
+            caller_sp: cpu.read_reg(Register::A7),
+            caller_pc: cpu.read_reg(Register::PC),
+            callback,
+            buffer,
+            return_gate,
+            bytes,
+            sent: 0,
+        });
+        if self.advance_picture_put(cpu, bus) {
+            true
+        } else {
+            self.finish_picture_put(bus);
+            false
+        }
+    }
+
+    /// Schedule one Pascal QDPutPicProc(dataPtr, byteCount), at most 32,767
+    /// bytes; the procedure removes its six argument bytes on return.
+    fn advance_picture_put<C: CpuOps>(&mut self, cpu: &mut C, bus: &mut MacMemoryBus) -> bool {
+        let Some(frame) = self.picture_put.as_mut() else {
+            return false;
+        };
+        let count = (frame.bytes.len() - frame.sent).min(MAX_READ);
+        if count == 0 {
+            return false;
+        }
+        let Some(sp) = frame.caller_sp.checked_sub(10) else {
+            return false;
+        };
+        if !bus.is_guest_address_writable(sp, 10)
+            || !self.guest_calls.begin_m68k_with_operation(
+                GuestCallTarget {
+                    isa: GuestIsa::M68k,
+                    entry: frame.callback,
+                    rtoc: 0,
+                },
+                frame.return_gate,
+                frame.caller_sp,
+                None,
+                None,
+            )
+        {
+            return false;
+        }
+        bus.write_bytes(frame.buffer, &frame.bytes[frame.sent..frame.sent + count]);
+        frame.sent += count;
+        bus.write_long(sp, frame.return_gate);
+        bus.write_word(sp + 4, count as u16);
+        bus.write_long(sp + 6, frame.buffer);
+        cpu.write_reg(Register::A7, sp);
+        cpu.write_reg(Register::PC, frame.callback);
+        true
+    }
+
+    fn finish_picture_put(&mut self, bus: &mut MacMemoryBus) -> Option<PicturePutFrame> {
+        let frame = self.picture_put.take()?;
+        bus.free(frame.buffer);
+        bus.free(frame.return_gate);
+        Some(frame)
+    }
+
+    pub(crate) fn resume_picture_put<C: CpuOps>(
+        &mut self,
+        cpu: &mut C,
+        bus: &mut MacMemoryBus,
+    ) -> Option<crate::Result<()>> {
+        let frame = self.picture_put.as_ref()?;
+        if cpu.read_reg(Register::PC) != frame.return_gate + 2
+            || cpu.read_reg(Register::A7) != frame.caller_sp
+        {
+            return None;
+        }
+        if self.advance_picture_put(cpu, bus) {
+            return Some(Ok(()));
+        }
+        let frame = self.finish_picture_put(bus)?;
+        cpu.write_reg(Register::A7, frame.caller_sp);
+        cpu.write_reg(Register::PC, frame.caller_pc);
+        Some(Ok(()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +452,135 @@ mod tests {
         assert_eq!(bus.read_bytes(header, 10), picture_header);
         assert_eq!(bus.read_byte(screen), 0x80);
         assert_eq!(dispatcher.guest_calls.depth(), 0);
+    }
+
+    fn write_rect(bus: &mut MacMemoryBus, ptr: u32, rect: [i16; 4]) {
+        for (index, value) in rect.into_iter().enumerate() {
+            bus.write_word(ptr + index as u32 * 2, value as u16);
+        }
+    }
+
+    #[test]
+    fn classic_closepicture_hands_banded_copybits_to_native_putpicproc() {
+        // Inside Macintosh I-197 to I-198: with putPicProc replaced, the
+        // picture's definition after its size and frame goes to that
+        // procedure, and the handle keeps the header. MacPaint copies a
+        // selection to its scrap file this way, one CopyBits per band.
+        let (mut dispatcher, mock, mut bus) = setup_with_port();
+        let mut cpu = M68kCpu::new();
+        cpu.write_reg(Register::A5, mock.read_reg(Register::A5));
+        cpu.write_reg(Register::A7, TEST_SP);
+        let caller_pc = 0x340002;
+        cpu.write_reg(Register::PC, caller_pc);
+        let port = 0x181000u32;
+        let screen = bus.read_long(port + 2);
+        let procs = 0x350300;
+        let callback = 0x360000;
+        let cursor = 0x350100;
+        let received = 0x370000;
+        bus.write_long(cursor, received);
+        bus.write_long(port + 104, procs);
+        bus.write_long(procs + 48, callback);
+        // Append byteCount bytes from dataPtr at the cursor, pop six bytes.
+        let words = [
+            0x302f, 4, // move.w 4(sp),d0
+            0x206f, 6, // movea.l 6(sp),a0
+            0x2279, 0x0035, 0x0100, // movea.l cursor,a1
+            0x5340, // subq.w #1,d0
+            0x12d8, // move.b (a0)+,(a1)+
+            0x51c8, 0xfffc, // dbra d0,copy
+            0x23c9, 0x0035, 0x0100, // move.l a1,cursor
+            0x225f, // movea.l (sp)+,a1
+            0x5c8f, // addq.l #6,sp
+            0x4ed1, // jmp (a1)
+        ];
+        for (index, word) in words.into_iter().enumerate() {
+            bus.write_word(callback + index as u32 * 2, word);
+        }
+
+        let frame = 0x350400;
+        write_rect(&mut bus, frame, [0, 0, 2, 8]);
+        bus.write_long(TEST_SP, frame);
+        dispatcher
+            .dispatch_quickdraw(true, 0xf3, &mut cpu, &mut bus)
+            .unwrap()
+            .unwrap();
+        let picture = bus.read_long(TEST_SP + 4);
+
+        // Two bands of an 8 × 2 bitmap: rows $F0 and $0F.
+        let source = 0x350500;
+        bus.write_bytes(source, &[0xf0, 0, 0x0f, 0]);
+        let source_bits = 0x350510;
+        bus.write_long(source_bits, source);
+        bus.write_word(source_bits + 4, 2);
+        write_rect(&mut bus, source_bits + 6, [0, 0, 2, 8]);
+        for band in 0..2i16 {
+            let rect = 0x350520;
+            write_rect(&mut bus, rect, [band, 0, band + 1, 8]);
+            cpu.write_reg(Register::A7, TEST_SP);
+            bus.write_long(TEST_SP, 0); // maskRgn
+            bus.write_word(TEST_SP + 4, 0); // srcCopy
+            bus.write_long(TEST_SP + 6, rect);
+            bus.write_long(TEST_SP + 10, rect);
+            bus.write_long(TEST_SP + 14, port + 2);
+            bus.write_long(TEST_SP + 18, source_bits);
+            dispatcher
+                .dispatch_quickdraw(true, 0xec, &mut cpu, &mut bus)
+                .unwrap()
+                .unwrap();
+        }
+
+        cpu.write_reg(Register::A7, TEST_SP);
+        dispatcher
+            .dispatch_quickdraw(true, 0xf4, &mut cpu, &mut bus)
+            .unwrap()
+            .unwrap();
+        assert_eq!(cpu.read_reg(Register::PC), callback);
+        let mut finished = false;
+        for _ in 0..1_000_000 {
+            if cpu.read_reg(Register::PC) == caller_pc && dispatcher.picture_put.is_none() {
+                finished = true;
+                break;
+            }
+            match cpu.step(&mut bus) {
+                StepResult::Ok => {}
+                StepResult::Aline(opcode) => {
+                    dispatcher.dispatch(opcode, &mut cpu, &mut bus).unwrap()
+                }
+                _ => panic!("unexpected callback CPU result"),
+            }
+        }
+        assert!(finished, "putPicProc did not finish within the instruction bound");
+        assert_eq!(cpu.read_reg(Register::A7), TEST_SP);
+        assert_eq!(dispatcher.guest_calls.depth(), 0);
+
+        let header = bus.read_long(picture);
+        assert_eq!(bus.get_alloc_size(header), Some(10), "the handle keeps the header");
+        assert_eq!(
+            bus.read_bytes(header + 2, 8),
+            vec![0, 0, 0, 0, 0, 2, 0, 8],
+            "OpenPicture's frame"
+        );
+
+        // The header and what putPicProc received draw both bands.
+        let length = bus.read_long(cursor) - received;
+        let mut whole = bus.read_bytes(header, 10);
+        whole.extend(bus.read_bytes(received, length as usize));
+        let data = bus.alloc(whole.len() as u32);
+        bus.write_bytes(data, &whole);
+        let replay = bus.alloc(4);
+        bus.write_long(replay, data);
+        bus.write_long(procs + 48, 0);
+        bus.write_byte(screen, 0);
+        bus.write_byte(screen + 64, 0);
+        cpu.write_reg(Register::A7, TEST_SP);
+        bus.write_long(TEST_SP, frame);
+        bus.write_long(TEST_SP + 4, replay);
+        dispatcher
+            .dispatch_quickdraw(true, 0xf6, &mut cpu, &mut bus)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bus.read_byte(screen), 0xf0);
+        assert_eq!(bus.read_byte(screen + 64), 0x0f);
     }
 }

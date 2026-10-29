@@ -27,6 +27,37 @@ pub const PARAM_ERR: i16 = -50;
 /// Standard success result code (`noErr = 0`).
 pub const NO_ERR: i16 = 0;
 
+/// Name of the file that holds the desk scrap while it is on disk
+/// (`scrapName`, Inside Macintosh I-457).
+pub const DESK_SCRAP_FILE_NAME: &str = "Clipboard File";
+
+/// Read desk scrap entries in their file layout: each entry's type, its
+/// length as a long, then its data padded to an even length (Inside
+/// Macintosh I-462). A truncated last entry keeps the bytes present.
+pub fn parse_scrap_entries(bytes: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
+    let mut entries = Vec::new();
+    let mut offset = 0usize;
+    while offset + 8 <= bytes.len() {
+        let flavor = [
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ];
+        let length = u32::from_be_bytes([
+            bytes[offset + 4],
+            bytes[offset + 5],
+            bytes[offset + 6],
+            bytes[offset + 7],
+        ]) as usize;
+        let start = offset + 8;
+        let end = start.saturating_add(length).min(bytes.len());
+        entries.push((flavor, bytes[start..end].to_vec()));
+        offset = start.saturating_add((length + 1) & !1);
+    }
+    entries
+}
+
 /// Evaluated fields for the 16-byte `ScrapStuff` record (Inside Macintosh I-457).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScrapStuffRecord {
@@ -243,5 +274,19 @@ mod tests {
         assert_eq!(evaluate_zero_scrap(), ZeroScrapAction);
         assert_eq!(evaluate_load_scrap(), LoadScrapAction);
         assert_eq!(evaluate_unload_scrap(), UnloadScrapAction);
+    }
+
+    #[test]
+    fn scrap_entries_parse_from_the_file_layout() {
+        let mut bytes = b"PICT".to_vec();
+        bytes.extend_from_slice(&3u32.to_be_bytes());
+        bytes.extend_from_slice(&[1, 2, 3, 0]); // padded to an even length
+        bytes.extend_from_slice(b"TEXT");
+        bytes.extend_from_slice(&2u32.to_be_bytes());
+        bytes.extend_from_slice(b"hi");
+        assert_eq!(
+            parse_scrap_entries(&bytes),
+            vec![(*b"PICT", vec![1, 2, 3]), (*b"TEXT", b"hi".to_vec())]
+        );
     }
 }

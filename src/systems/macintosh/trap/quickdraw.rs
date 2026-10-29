@@ -3381,7 +3381,18 @@ impl super::TrapDispatcher {
                         (dst_top, dst_left, dst_bottom, dst_right),
                         mode,
                     ) {
-                        self.recording_picture_bitmap = Some(snapshot);
+                        // Each CopyBits adds its opcode to the picture: one
+                        // recorded in bands (MacPaint's Cut and Copy) keeps
+                        // them all.
+                        self.recording_picture_bitmap =
+                            Some(match self.recording_picture_bitmap.take() {
+                                Some(mut picture) if picture.len() > 11 && snapshot.len() > 11 => {
+                                    picture.pop(); // EndOfPicture
+                                    picture.extend_from_slice(&snapshot[10..]);
+                                    picture
+                                }
+                                _ => snapshot,
+                            });
                     }
                     return Some(Ok(()));
                 }
@@ -9434,7 +9445,15 @@ impl super::TrapDispatcher {
                 if let Some((handle, top, left, bottom, right, commands)) =
                     self.recording_picture.take()
                 {
-                    let picture = if let Some(snapshot) = self.recording_picture_bitmap.take() {
+                    let picture = if let Some(mut snapshot) = self.recording_picture_bitmap.take() {
+                        // The picture's frame is OpenPicture's, its size the
+                        // whole definition's (Inside Macintosh I-159).
+                        let size = u16::try_from(snapshot.len()).unwrap_or(0);
+                        snapshot[0..2].copy_from_slice(&size.to_be_bytes());
+                        for (index, value) in [top, left, bottom, right].into_iter().enumerate() {
+                            snapshot[2 + index * 2..4 + index * 2]
+                                .copy_from_slice(&(value as u16).to_be_bytes());
+                        }
                         Some(snapshot)
                     } else if commands.is_empty() {
                         let mut source = self.resolve_copy_bitmap(bus, *self.current_port + 2);
@@ -9474,9 +9493,17 @@ impl super::TrapDispatcher {
                         ))
                     };
                     if let Some(picture) = picture {
+                        // An application's putPicProc receives the definition
+                        // after the size and frame, which stay in the handle
+                        // (Inside Macintosh I-197 to I-198).
+                        let put_pic_proc = self.custom_put_pic_proc(cpu, bus);
+                        let stored = match put_pic_proc {
+                            Some(_) => &picture[..picture.len().min(10)],
+                            None => &picture[..],
+                        };
                         let old_pic = bus.read_long(handle);
-                        let pic = bus.alloc(picture.len() as u32);
-                        bus.write_bytes(pic, &picture);
+                        let pic = bus.alloc(stored.len() as u32);
+                        bus.write_bytes(pic, stored);
                         bus.write_long(handle, pic);
                         if old_pic != 0 {
                             bus.free(old_pic);
@@ -9489,6 +9516,10 @@ impl super::TrapDispatcher {
                             picture.len(),
                             handle
                         );
+                        if let Some(callback) = put_pic_proc {
+                            let definition = picture.get(10..).unwrap_or_default().to_vec();
+                            self.begin_picture_put(cpu, bus, callback, definition);
+                        }
                     }
                 }
                 Ok(())

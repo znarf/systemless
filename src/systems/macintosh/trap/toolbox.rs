@@ -4388,6 +4388,53 @@ impl super::TrapDispatcher {
         0
     }
 
+    /// Write the desk scrap to its file, as UnloadScrap does (Inside
+    /// Macintosh I-458): the file named by `scrapName`, in the default
+    /// directory unless it already exists elsewhere.
+    fn write_desk_scrap_file(&mut self) -> bool {
+        let name = crate::scrap_manager::DESK_SCRAP_FILE_NAME;
+        let Some(key) = self
+            .find_vfs_file(name)
+            .or_else(|| self.vfs_key_for_fsspec(0, 0, name))
+        else {
+            return false;
+        };
+        if self.vfs_path_is_read_only(&key) {
+            return false;
+        }
+        let bytes = self.scrap.serialized_entries();
+        if let Some(ref dir) = self.output_dir {
+            let host_path = dir.join(&key);
+            if let Some(parent) = host_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(host_path, &bytes);
+        }
+        self.vfs.insert(key.clone(), bytes);
+        if self.vfs_rsrc.get(&key).is_none() {
+            self.vfs_rsrc.insert(key.clone(), Vec::new());
+        }
+        self.set_vfs_entry_metadata(&key, *b"CLIP", *b"MACS", 0);
+        self.touch_vfs_entry(&key);
+        true
+    }
+
+    /// While the desk scrap is on disk its file is the scrap: an application
+    /// may write it directly, as MacPaint does, and GetScrap, LoadScrap and
+    /// InfoScrap read it (Inside Macintosh I-457 to I-458).
+    fn refresh_desk_scrap_from_file(&mut self) {
+        if self.scrap.summary().in_memory {
+            return;
+        }
+        let Some(key) = self.find_vfs_file(crate::scrap_manager::DESK_SCRAP_FILE_NAME) else {
+            return;
+        };
+        if let Some(bytes) = self.vfs.get(&key) {
+            let entries = crate::scrap_manager::parse_scrap_entries(bytes);
+            self.scrap.replace_disk_entries(entries);
+        }
+    }
+
     fn sync_scrap_handle(&mut self, bus: &mut MacMemoryBus) -> u32 {
         let handle = self.scrap.ensure_handle(|| {
             let handle = bus.alloc(4);
@@ -9961,6 +10008,14 @@ impl super::TrapDispatcher {
                 let ptr = self.scrap.ensure_stuff_ptr(|| {
                     bus.alloc(crate::scrap_manager::SCRAP_STUFF_RECORD_SIZE as u32)
                 });
+                if self.scrap_name_ptr == 0 {
+                    let name = crate::scrap_manager::DESK_SCRAP_FILE_NAME.as_bytes();
+                    self.scrap_name_ptr = bus.alloc(name.len() as u32 + 1);
+                    if self.scrap_name_ptr != 0 {
+                        bus.write_pstring(self.scrap_name_ptr, name);
+                    }
+                }
+                self.refresh_desk_scrap_from_file();
                 let summary = self.scrap.summary();
                 let scrap_handle = if summary.in_memory {
                     self.sync_scrap_handle(bus)
@@ -9978,7 +10033,7 @@ impl super::TrapDispatcher {
                 bus.write_word(ptr + 8, evaluated.scrap_count); // scrapCount
                                                                 // IM:I I-457: scrapState is positive when the scrap is in memory.
                 bus.write_word(ptr + 10, evaluated.scrap_state as u16);
-                bus.write_long(ptr + 12, evaluated.scrap_name); // scrapName (NIL)
+                bus.write_long(ptr + 12, self.scrap_name_ptr); // scrapName
                 bus.write_long(sp, ptr); // return value
                 Ok(())
             }
@@ -10003,25 +10058,28 @@ impl super::TrapDispatcher {
             //    does nothing. If no error occurs, UnloadScrap returns
             //    the result code noErr".
             //
-            // Systemless HLE models the observable resident/on-disk
-            // transition: the in-memory scrap handle is dropped and
-            // InfoScrap reports scrapState=0 until LoadScrap brings it
-            // back. `scrap_clipboard_writable` gates the observable
-            // error path when the scrap is resident but cannot be
-            // written out.
+            // The scrap is written to the file `scrapName` names, the
+            // in-memory scrap handle is dropped, and InfoScrap reports
+            // scrapState=0 until LoadScrap brings it back from that file.
+            // Without a writable file, `scrap_clipboard_writable` gates
+            // the observable error path.
             //
             // Regression coverage:
             //   src/trap/toolbox.rs::tests::unloadscrap_and_loadscrap_return_noerr
             (true, 0x1FA) => {
                 let sp = cpu.read_reg(Register::A7);
                 let _action = crate::scrap_manager::evaluate_unload_scrap();
-                match self.scrap.unload() {
+                let unloaded = if self.scrap.summary().in_memory && self.write_desk_scrap_file() {
+                    Ok(self.scrap.release_to_disk())
+                } else {
+                    self.scrap.unload()
+                };
+                match unloaded {
                     Err(()) => bus.write_long(sp, (-1i32) as u32), // generic non-zero OSErr
                     Ok(Some(handle)) => {
                         let _ = self.write_bytes_to_handle(bus, handle, &[]);
                         bus.free(handle);
                         bus.write_long(sp, crate::scrap_manager::NO_ERR as u32);
-                        // noErr (Systemless HLE: no scrap-file IO)
                     }
                     Ok(None) => bus.write_long(sp, crate::scrap_manager::NO_ERR as u32), // already on disk; noErr
                 }
@@ -10059,6 +10117,7 @@ impl super::TrapDispatcher {
             (true, 0x1FB) => {
                 let sp = cpu.read_reg(Register::A7);
                 let _action = crate::scrap_manager::evaluate_load_scrap();
+                self.refresh_desk_scrap_from_file();
                 self.scrap.load();
                 bus.write_long(sp, crate::scrap_manager::NO_ERR as u32); // noErr
                 Ok(())
@@ -10104,6 +10163,7 @@ impl super::TrapDispatcher {
                 let params = crate::scrap_manager::evaluate_get_scrap_parameters(
                     h_dest, the_type, offset_ptr,
                 );
+                self.refresh_desk_scrap_from_file();
 
                 match self.scrap.flavor(params.flavor_type) {
                     Some(flavor) => {
