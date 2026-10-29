@@ -2240,6 +2240,8 @@ pub struct TrapDispatcher {
     /// we are nested inside the proc, so CopyBits performs the blit itself.
     pub(crate) bits_proc_reentry: Option<(u32, u32)>,
     pub(crate) picture_stream_stack: Vec<super::picture_stream::PictureStreamFrame>,
+    /// A closed picture being handed to an application's putPicProc.
+    pub(crate) picture_put: Option<super::picture_stream::PicturePutFrame>,
     pub(crate) picture_callback_stack: Vec<super::picture_callbacks::PictureCallbackFrame>,
     /// Installed Time Manager tasks.
     /// Processes 1994, 3-14
@@ -2392,6 +2394,8 @@ pub struct TrapDispatcher {
     pub(crate) dialog_popup_candidate_items: HashSet<(u32, i16)>,
     /// Process-owned desk scrap shared by classic and native gateways.
     pub(crate) scrap: SharedProcessScrapState,
+    /// The Pascal string `scrapName` points to (Inside Macintosh I-457).
+    pub(crate) scrap_name_ptr: u32,
     /// Most recent pack ID passed to InitPack.
     /// Kept as lightweight bookkeeping for future pack-specific heuristics.
     pub last_init_pack_id: Option<i16>,
@@ -4131,6 +4135,7 @@ impl TrapDispatcher {
             pending_native_trap_calls: HashMap::default(),
             bits_proc_reentry: None,
             picture_stream_stack: Vec::new(),
+            picture_put: None,
             picture_callback_stack: Vec::new(),
             timer_tasks: Default::default(),
             deferred_tasks: VecDeque::new(),
@@ -4182,6 +4187,7 @@ impl TrapDispatcher {
             dialog_popup_original_rects: HashMap::default(),
             dialog_popup_candidate_items: HashSet::default(),
             scrap: SharedProcessScrapState::default(),
+            scrap_name_ptr: 0,
             last_init_pack_id: None,
         });
         dispatcher.ensure_vfs_directory("System Folder");
@@ -8289,6 +8295,9 @@ impl TrapDispatcher {
             return Some(result);
         }
         if let Some(result) = self.resume_picture_stream(cpu, bus) {
+            return Some(result);
+        }
+        if let Some(result) = self.resume_picture_put(cpu, bus) {
             return Some(result);
         }
         if self.resume_completed_menu_bar_build(cpu, bus)

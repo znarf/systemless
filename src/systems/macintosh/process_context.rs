@@ -2722,6 +2722,23 @@ impl ProcessScrapState {
         Ok(self.handle.take())
     }
 
+    /// The scrap now lives in its file: release the in-memory copy.
+    fn release_to_disk(&mut self) -> Option<u32> {
+        if !self.in_memory {
+            return None;
+        }
+        self.in_memory = false;
+        self.handle_dirty = true;
+        self.handle.take()
+    }
+
+    /// The entries read back from the scrap file while the scrap is on disk.
+    fn replace_disk_entries(&mut self, entries: Vec<([u8; 4], Vec<u8>)>) {
+        self.initialized = true;
+        self.entries = entries;
+        self.handle_dirty = true;
+    }
+
     fn ensure_handle(&mut self, allocate: impl FnOnce() -> u32) -> u32 {
         *self.handle.get_or_insert_with(allocate)
     }
@@ -3822,6 +3839,14 @@ impl SharedProcessScrapState {
 
     pub(crate) fn unload(&self) -> Result<Option<u32>, ()> {
         self.with_mut(ProcessScrapState::unload)
+    }
+
+    pub(crate) fn release_to_disk(&self) -> Option<u32> {
+        self.with_mut(ProcessScrapState::release_to_disk)
+    }
+
+    pub(crate) fn replace_disk_entries(&self, entries: Vec<([u8; 4], Vec<u8>)>) {
+        self.with_mut(|scrap| scrap.replace_disk_entries(entries));
     }
 
     pub(crate) fn ensure_handle(&self, allocate: impl FnOnce() -> u32) -> u32 {
