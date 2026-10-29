@@ -12629,6 +12629,43 @@
         );
     }
 
+    // An editText selection reaching the text's end is inverted up to its
+    // last character, not to the field's right edge (TextEdit's highlight).
+    #[test]
+    fn edit_text_selection_ends_at_the_last_selected_character() {
+        let (mut disp, _cpu, mut bus) = setup();
+        let screen_base = 0x300000u32;
+        let row_bytes = 64u32;
+        disp.set_screen_mode_for_test(screen_base, row_bytes, 512, 342, 1);
+        let (top, left, bottom, right) = (100i16, 50i16, 116i16, 262i16);
+        disp.draw_edit_text(&mut bus, top, left, bottom, right, "SomeWhere", true);
+        let ink = |bus: &MacMemoryBus, x: i16, y: i16| {
+            screen_pixel_is_set(bus, screen_base, row_bytes, x, y)
+        };
+        // Row top + 1 is above the glyphs, where the highlight is solid.
+        assert!(
+            ink(&bus, left, top + 1),
+            "the highlight starts at the field's left"
+        );
+        let highlight_end = (left..right)
+            .rev()
+            .find(|&x| ink(&bus, x, top + 1))
+            .expect("a highlight");
+        // The glyphs show white inside the highlight: the last of them.
+        let glyph_end = (top..bottom)
+            .filter_map(|y| (left..highlight_end).rev().find(|&x| !ink(&bus, x, y)))
+            .max()
+            .expect("the text's glyphs");
+        assert!(
+            highlight_end - glyph_end <= 3,
+            "the highlight ends with the last glyph ({glyph_end}), at {highlight_end}"
+        );
+        assert!(
+            !ink(&bus, right - 2, top + 1),
+            "white to the field's right edge"
+        );
+    }
+
     #[test]
     fn modal_dialog_button_tracking_systemless_theme_routes_pressed_state_through_provider() {
         let (mut disp, _cpu, mut bus) = setup();

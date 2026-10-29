@@ -9207,24 +9207,21 @@ impl super::TrapDispatcher {
                     let line_height = metrics.ascent + metrics.descent + metrics.leading;
                     let selection_top = top;
                     let selection_bottom = top.saturating_add(line_height).min(bottom);
+                    // Measured in the size the text was just drawn in,
+                    // not the current port's txSize.
                     let selection_left = if start == 0 {
                         left
                     } else {
                         left + Self::TE_LINE_LEFT_INSET
-                            + self.te_measure_text_width(
-                                font_id,
-                                self.tx_size,
-                                &text_bytes,
-                                0,
-                                start,
-                            )
+                            + self.te_measure_text_width(font_id, font_size, &text_bytes, 0, start)
                     };
-                    let selection_right = if end >= text_bytes.len() {
-                        right
-                    } else {
-                        left + Self::TE_LINE_LEFT_INSET
-                            + self.te_measure_text_width(font_id, self.tx_size, &text_bytes, 0, end)
-                    };
+                    // Up to the last selected character, the text's end
+                    // included, as TextEdit's own highlight does (IM I-375),
+                    // not to the field's right edge.
+                    let selection_right = (left
+                        + Self::TE_LINE_LEFT_INSET
+                        + self.te_measure_text_width(font_id, font_size, &text_bytes, 0, end))
+                    .min(right);
                     if selection_left < selection_right && selection_top < selection_bottom {
                         if self.ui_theme_id() == UiThemeId::ClassicSystem7 {
                             self.invert_rect_exact(

@@ -17,7 +17,8 @@ The bucket, lasso, copy, paste and FatBits scripts check drawing pixels;
 reopened draws, saves, closes and reopens a picture and checks its pixels.
 Alert-button checks the
 highlight while held and after dragging outside; save-dialog checks that the
-menu title is no longer highlighted. Inspect `report.json` for assertion
+menu title is no longer highlighted. Save-selection checks that the Save dialog's selected
+name is inverted up to its last character, not to the field's edge. Inspect `report.json` for assertion
 results and exhausted frames.
 
 On 29 October 2026, a local Chromium 156 preview using the pinned ZIP and a
