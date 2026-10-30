@@ -3956,8 +3956,8 @@
         let result = disp.dispatch_dialog(true, 0x17F, &mut cpu, &mut bus);
         assert!(result.unwrap().is_ok());
         assert_eq!(cpu.read_reg(Register::A7), TEST_SP + 4);
-        assert_eq!(bus.read_byte(TEST_SP + 4), 0);
-        assert_eq!(bus.read_byte(TEST_SP + 5), 0xA5);
+        // Startside's patch: the whole result word, so a caller testing it with TST.W (MacWrite 1.1) sees FALSE.
+        assert_eq!(bus.read_word(TEST_SP + 4), 0);
     }
 
     #[test]
@@ -3990,7 +3990,8 @@
         let result = disp.dispatch_dialog(true, 0x17F, &mut cpu, &mut bus);
         assert!(result.unwrap().is_ok());
         assert_eq!(bus.read_byte(TEST_SP + 4), 1);
-        assert_eq!(bus.read_byte(TEST_SP + 5), 0xA5);
+        // Startside's patch: TRUE is the whole word $0100.
+        assert_eq!(bus.read_word(TEST_SP + 4), 0x0100);
         let trace = disp.input_trace_text();
         assert!(trace.contains("A97F action=guest_event:mouseDown"));
         assert!(trace.contains("tracking=menu:idle dialog:idle control:idle"));
@@ -4154,7 +4155,8 @@
         assert!(result.unwrap().is_ok());
         assert_eq!(cpu.read_reg(Register::A7), TEST_SP + 12);
         assert_eq!(bus.read_byte(TEST_SP + 12), 1);
-        assert_eq!(bus.read_byte(TEST_SP + 13), 0xA5);
+        // Startside's patch: the whole result word.
+        assert_eq!(bus.read_word(TEST_SP + 12), 0x0100);
         assert_eq!(bus.read_long(dialog_out_ptr), dialog_ptr);
         assert_eq!(bus.read_word(item_hit_ptr), 1);
         let trace = disp.input_trace_text();

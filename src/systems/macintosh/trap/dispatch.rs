@@ -1848,6 +1848,10 @@ pub struct TrapDispatcher {
     /// accessories in the Apple menu (they ran half-working, and broke the
     /// application's own clicks).
     pub desk_accessories_hidden: bool,
+    /// Startside's patch: an application without a SIZE resource, older than MultiFinder (1987): $A9E6 is
+    /// InitAllPacks for it (no arguments; GetIndString otherwise), and TextFace reads the style in the low
+    /// byte of its word, as the Pascal of 1984 pushed it.
+    pub(crate) pre_multifinder_app: bool,
     /// Sound Manager state (channels, playback buffers).
     pub(crate) sound_manager: SharedProcessSoundManager,
     /// Menus loaded from MENU resources, in order of insertion
@@ -2360,6 +2364,9 @@ pub struct TrapDispatcher {
     /// Saved visRgn for active BeginUpdate/EndUpdate pairs, keyed by window.
     /// Inside Macintosh Volume I, I-292 to I-293
     pub(crate) saved_vis_regions: FastHashMap<u32, (i16, i16, i16, i16)>,
+    /// Startside's patch: the port's portBits.bounds top-left at BeginUpdate, the coordinates EndUpdate gives the
+    /// visRgn back in (an application may have swapped portBits meanwhile).
+    pub(crate) saved_update_bounds: FastHashMap<u32, (i16, i16)>,
     /// Process-owned List Manager state shared with native execution.
     pub(crate) list_states: SharedProcessListManager,
     pub(crate) collections: SharedProcessCollectionManager,
@@ -3978,6 +3985,7 @@ impl TrapDispatcher {
             initial_kiosk_guest_hide_observed: false,
             menu_bar_hidden: false,
             desk_accessories_hidden: false,
+            pre_multifinder_app: false,
             sound_manager: SharedProcessSoundManager::default(),
             menus: Vec::new(),
             menu_tracking,
@@ -4171,6 +4179,7 @@ impl TrapDispatcher {
             pending_modal_button_dispose_dialog: None,
             window_stack: Vec::new(),
             saved_vis_regions: HashMap::default(),
+            saved_update_bounds: HashMap::default(),
             list_states: SharedProcessListManager::default(),
             collections: SharedProcessCollectionManager::default(),
             drag_manager: SharedProcessDragManager::default(),

@@ -6340,6 +6340,13 @@ impl super::TrapDispatcher {
             // (4 bytes). Pop 8 bytes.
             // GetIndString ($A9E6): Looks up STR# resource by ID, returns 1-based indexed Pascal string per IM:I I-468; empty string on not-found or out-of-range. Trap-word $A9E6 repurposed by Apple System 7+ from legacy InitAllPacks (per IM:III line 9512 master dispatch table) — same trap-word-repurposing pattern as $A056 LwrString→LowerText family per IM:VI 30881. System 6 InitAllPacks callers would dereference stale stack values via Systemless's GetIndString frame; no current corpus title is System 6 era.
             (true, 0x1E6) => {
+                // Startside's patch: InitAllPacks (Inside Macintosh I, the Package Manager; $A9E6 in its trap list) for the applications of
+                // 1984-89, which call it once at start with nothing on the stack: read as GetIndString, it popped 8
+                // bytes, MacWrite 1.1 lost its return address and quit right after its printer setup. The packages
+                // load when first called, so there is nothing to do.
+                if self.pre_multifinder_app {
+                    return Some(Ok(()));
+                }
                 let sp = cpu.read_reg(Register::A7);
                 let pc = cpu.read_reg(Register::PC);
                 // Stack layout: SP+0=index, SP+2=strListID, SP+4=theString (VAR ptr)
