@@ -1479,6 +1479,9 @@ pub struct TrapDispatcher {
     /// Address of the lazily-allocated trampoline template used by the
     /// Window Manager to call a guest WDEF procedure.
     pub(crate) window_def_trampoline: u32,
+    /// Startside's patch: counts writes to the virtual disk (a file's data or resources, a file removed), so an
+    /// embedder can look for changed files only when something was written.
+    pub(crate) vfs_write_generation: u64,
     /// Address of the lazily-allocated trampoline template used by the
     /// Control Manager to call a guest CDEF procedure.
     pub(crate) control_def_trampoline: u32,
@@ -3861,6 +3864,7 @@ impl TrapDispatcher {
             device_loop_trampoline: 0,
             list_def_trampoline: 0,
             window_def_trampoline: 0,
+            vfs_write_generation: 0,
             control_def_trampoline: 0,
             control_def_trampoline_chain: Vec::new(),
             control_callback_stack: Vec::new(),
@@ -5229,6 +5233,7 @@ impl TrapDispatcher {
     }
 
     pub(crate) fn touch_vfs_entry(&mut self, name: &str) {
+        self.vfs_write_generation = self.vfs_write_generation.wrapping_add(1); // Startside's patch
         let normalized = Self::normalize_vfs_path(name);
         self.ensure_vfs_file_metadata(&normalized);
         let timestamp = self.allocate_vfs_timestamp();
@@ -5262,6 +5267,7 @@ impl TrapDispatcher {
     }
 
     pub fn remove_vfs_path(&mut self, name: &str) -> bool {
+        self.vfs_write_generation = self.vfs_write_generation.wrapping_add(1); // Startside's patch
         let normalized = Self::normalize_vfs_path(name);
         if normalized.is_empty() {
             return false;

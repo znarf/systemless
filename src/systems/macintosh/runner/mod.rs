@@ -2894,6 +2894,18 @@ impl FixtureRunner {
         )
     }
 
+    /// The 68K's D0-D7 then A0-A7 (a diagnostic for embedders: Startside's patch).
+    pub fn m68k_registers(&self) -> [u32; 16] {
+        use Register::*;
+        let r = [D0, D1, D2, D3, D4, D5, D6, D7, A0, A1, A2, A3, A4, A5, A6, A7];
+        r.map(|reg| self.m68k.cpu.read_reg(reg))
+    }
+
+    /// The program counter now (a diagnostic for embedders: Startside's patch).
+    pub fn program_counter(&self) -> u32 {
+        self.current_oracle_pc()
+    }
+
     fn current_oracle_pc(&self) -> u32 {
         self.native
             .application()
@@ -3650,6 +3662,17 @@ impl FixtureRunner {
         mounted.path = format!("{app_parent}/{relative_dir}/{filename}");
         self.import_vfs_file(&mounted);
         Ok(())
+    }
+
+    /// Startside's patch: the virtual disk's write counter (see `vfs_write_generation`), cheap to poll.
+    pub fn vfs_write_generation(&self) -> u64 {
+        self.dispatcher.vfs_write_generation
+    }
+
+    /// Startside's patch: the paths whose data fork the application has open now (FSOpen/PBOpen not yet closed):
+    /// a file still open may be half written, an embedder keeping saves waits for its close.
+    pub fn open_vfs_paths(&self) -> Vec<String> {
+        self.dispatcher.open_files.iter().map(|record| record.path.clone()).collect()
     }
 
     pub fn remove_vfs_file(&mut self, path: &str) -> bool {
