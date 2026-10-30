@@ -1645,6 +1645,10 @@ pub struct TrapDispatcher {
     pub(crate) legacy_sound_driver_channel: Option<u32>,
     /// Stable, driver-owned ICN# and Pascal device name for virtual disks.
     pub(crate) disk_driver_icon: Option<u32>,
+    /// Asynchronous writes to the Sound Driver, oldest first: the first plays,
+    /// the others wait their turn in the driver's I/O queue (Startside's patch).
+    pub(crate) legacy_sound_driver_requests:
+        VecDeque<super::sound::LegacySoundDriverRequest>,
     /// Process-owned refnums whose access paths grant write permission.
     /// Files 1992, pp. 2-7--2-8 and 2-121 defines permission as access-path
     /// state and `wrPermErr` (-61) for writes through a read-only path.
@@ -1865,6 +1869,10 @@ pub struct TrapDispatcher {
     /// InitAllPacks for it (no arguments; GetIndString otherwise), and TextFace reads the style in the low
     /// byte of its word, as the Pascal of 1984 pushed it.
     pub(crate) pre_multifinder_app: bool,
+    /// Startside's patch: false, the menu bar is drawn only when the guest asks
+    /// (DrawMenuBar, menu tracking), as on the real machine, where a game
+    /// drawing over it covers it; true (the default), redrawn every frame.
+    pub menu_bar_redrawn_each_frame: bool,
     /// Sound Manager state (channels, playback buffers).
     pub(crate) sound_manager: SharedProcessSoundManager,
     /// Menus loaded from MENU resources, in order of insertion
@@ -3959,6 +3967,7 @@ impl TrapDispatcher {
             synthetic_drivers: HashMap::default(),
             legacy_sound_driver_channel: None,
             disk_driver_icon: None,
+            legacy_sound_driver_requests: VecDeque::new(),
             write_refnums,
             file_positions,
             recent_file_read: None,
@@ -4027,6 +4036,7 @@ impl TrapDispatcher {
             menu_bar_hidden: false,
             desk_accessories_hidden: false,
             pre_multifinder_app: false,
+            menu_bar_redrawn_each_frame: true,
             sound_manager: SharedProcessSoundManager::default(),
             menus: Vec::new(),
             menu_tracking,

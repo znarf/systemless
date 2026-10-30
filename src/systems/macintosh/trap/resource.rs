@@ -4223,6 +4223,18 @@ impl super::TrapDispatcher {
                 );
 
                 let signed_ref_num = ref_num as i16;
+                // StartSound with a completion routine: queued, done when it
+                // has played (Inside Macintosh Volume II, II-231; Startside's patch).
+                if signed_ref_num == -4
+                    && matches!(
+                        raw_trap_route(self.current_trap_word).os_routine_variant,
+                        OsRoutineVariant::ParameterBlockAsynchronous
+                    )
+                {
+                    self.queue_legacy_sound_driver_write(bus, pb, buffer, request_count);
+                    cpu.write_reg(Register::D0, 0);
+                    return Some(Ok(()));
+                }
                 if signed_ref_num < 0 {
                     let result =
                         self.write_device_driver(bus, signed_ref_num, buffer, request_count);
@@ -4909,6 +4921,10 @@ impl super::TrapDispatcher {
             //   pbkillio_writes_same_oserr_to_d0_and_ioresult_preserving_stack
             (false, 0x06) => {
                 let pb = cpu.read_reg(Register::A0);
+                // The Sound Driver has a queue now (Startside's patch).
+                if pb != 0 && bus.read_word(pb + 24) as i16 == -4 {
+                    self.kill_legacy_sound_driver_io(bus);
+                }
                 bus.write_word(pb + 16, 0); // noErr → pb.ioResult
                 cpu.write_reg(Register::D0, 0); // noErr → D0
                 Ok(())
