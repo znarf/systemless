@@ -11478,7 +11478,10 @@ impl super::TrapDispatcher {
                 // return canonical TRUE as 1. Writing a word-sized -1 here
                 // both gives exact-value callers 0xFF and overwrites the
                 // adjacent stack byte.
-                bus.write_byte(sp + 4, if result { 1 } else { 0 });
+                // Startside's patch: the whole two-byte result slot, TRUE as $0100 (its low byte 0): MacWrite 1.1
+                // tests it with TST.W after a SUBQ that leaves its low byte as it was, and took every event for
+                // its Find dialog (never opened): no typing, no ruler.
+                bus.write_word(sp + 4, if result { 0x0100 } else { 0 });
                 cpu.write_reg(Register::A7, sp + 4);
                 Ok(())
             }
@@ -11769,7 +11772,8 @@ impl super::TrapDispatcher {
 
                 // DialogSelect shares IsDialogEvent's one-byte Pascal
                 // Boolean ABI: canonical TRUE is 1, not a word-sized -1.
-                bus.write_byte(sp + 12, if result { 1 } else { 0 });
+                // Startside's patch: the whole slot, as IsDialogEvent's.
+                bus.write_word(sp + 12, if result { 0x0100 } else { 0 });
                 cpu.write_reg(Register::A7, sp + 12);
                 Ok(())
             }

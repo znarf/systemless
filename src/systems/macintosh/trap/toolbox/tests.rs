@@ -3409,6 +3409,18 @@ fn random_maps_minus_32768_slot_to_zero() {
 // correct 12-byte frame (rect passed by pointer). Its contract tests
 // are in pttoangle_*.
 
+// Startside's patch: for an application older than MultiFinder, $A9E6 is InitAllPacks, with nothing on the stack.
+#[test]
+fn a9e6_is_init_all_packs_for_a_pre_multifinder_application() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    disp.pre_multifinder_app = true;
+    bus.write_long(TEST_SP, 0x0002_6340); // a caller's return address, not arguments
+    let result = disp.dispatch_toolbox(true, 0x1E6, &mut cpu, &mut bus);
+    assert!(result.unwrap().is_ok());
+    assert_eq!(cpu.read_reg(Register::A7), TEST_SP);
+    assert_eq!(bus.read_long(TEST_SP), 0x0002_6340);
+}
+
 // GetIndString ($A9E6)
 #[test]
 fn test_get_ind_string() {
