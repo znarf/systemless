@@ -1,0 +1,190 @@
+{
+  "version": 1,
+  "clock": "frontend_ticks",
+  "max_ticks": 800,
+  "actions": [
+    {
+      "type": "run",
+      "ticks": 400
+    },
+    {
+      "type": "screenshot",
+      "name": "open"
+    },
+    {
+      "type": "mouse_move",
+      "v": 150,
+      "h": 200
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_down",
+      "v": 150,
+      "h": 200
+    },
+    {
+      "type": "run",
+      "ticks": 3
+    },
+    {
+      "type": "mouse_move",
+      "v": 153,
+      "h": 204
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_move",
+      "v": 156,
+      "h": 208
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_move",
+      "v": 159,
+      "h": 212
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_move",
+      "v": 162,
+      "h": 216
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_move",
+      "v": 165,
+      "h": 220
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_move",
+      "v": 168,
+      "h": 224
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_move",
+      "v": 171,
+      "h": 228
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_move",
+      "v": 174,
+      "h": 232
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_move",
+      "v": 177,
+      "h": 236
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_move",
+      "v": 180,
+      "h": 240
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_up",
+      "v": 180,
+      "h": 240
+    },
+    {
+      "type": "run",
+      "ticks": 3
+    },
+    {
+      "type": "run",
+      "ticks": 20
+    },
+    {
+      "type": "screenshot",
+      "name": "brushed"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 200,
+      "y": 150,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 218,
+      "y": 163,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 239,
+      "y": 180,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 230,
+      "y": 150,
+      "rgb": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 200,
+      "y": 170,
+      "rgb": [
+        255,
+        255,
+        255
+      ]
+    }
+  ]
+}
