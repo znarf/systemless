@@ -4840,20 +4840,19 @@ impl super::TrapDispatcher {
         let edit_field =
             bus.read_word(dialog_ptr + crate::dialog_manager::DIALOG_EDIT_FIELD_OFFSET) as i16;
         let stored_edit_item = if edit_field >= 0 { edit_field + 1 } else { 0 };
+        // Startside's patch: a disabled editText item still takes typing (disabling only keeps ModalDialog and
+        // DialogSelect from returning it, IM I-405): MacPaint 2.0's personalize dialog has only disabled ones, and its
+        // Name and Company fields took nothing.
         let stored_is_valid = stored_edit_item > 0
             && items
                 .get((stored_edit_item - 1) as usize)
-                .is_some_and(|item| {
-                    item.is_edit_text() && item.is_enabled()
-                });
+                .is_some_and(|item| item.is_edit_text());
         let edit_item = if stored_is_valid {
             stored_edit_item
         } else {
             items
                 .iter()
-                .position(|item| {
-                    item.is_edit_text() && item.is_enabled()
-                })
+                .position(|item| item.is_edit_text())
                 .map(|idx| (idx + 1) as i16)
                 .unwrap_or(0)
         };
@@ -4930,8 +4929,8 @@ impl super::TrapDispatcher {
             return false;
         };
         let base_type = dialog_item_base_type(item.item_type);
-        let is_disabled = is_dialog_item_disabled(item.item_type);
-        if base_type != DIALOG_ITEM_EDIT_TEXT || is_disabled {
+        // Startside's patch: a disabled editText item takes typing too (IM I-405).
+        if base_type != DIALOG_ITEM_EDIT_TEXT {
             return false;
         }
 
@@ -5027,9 +5026,8 @@ impl super::TrapDispatcher {
         let Some(item) = items.get((edit_item - 1) as usize) else {
             return false;
         };
-        if dialog_item_base_type(item.item_type) != DIALOG_ITEM_EDIT_TEXT
-            || is_dialog_item_disabled(item.item_type)
-        {
+        // Startside's patch: a disabled editText item can be the active one too (IM I-405).
+        if dialog_item_base_type(item.item_type) != DIALOG_ITEM_EDIT_TEXT {
             return false;
         }
 
@@ -12983,6 +12981,40 @@ impl super::TrapDispatcher {
                                     let item = &items_clone[(hit - 1) as usize];
                                     let base_type = dialog_item_base_type(item.item_type);
                                     let is_disabled = is_dialog_item_disabled(item.item_type);
+
+                                    // Startside's patch: a click in a disabled editText item moves the insertion
+                                    // point there and ModalDialog goes on (IM I-405: disabling only keeps the item
+                                    // from being returned); MacPaint 2.0's Name and Company are both disabled.
+                                    if is_disabled && base_type == DIALOG_ITEM_EDIT_TEXT {
+                                        // The insertion point at the end of its text, which typing then extends.
+                                        let (dlg_ptr, edit_item, edit_text, items) = {
+                                            let tracking = self.dialog_tracking.as_mut().unwrap();
+                                            Self::sync_tracking_active_edit_item(tracking);
+                                            tracking.edit_item = hit;
+                                            if let Some(item) = tracking.items.get_mut((hit - 1) as usize) {
+                                                let end = item.text.len().min(i16::MAX as usize) as i16;
+                                                item.sel_start = end;
+                                                item.sel_end = end;
+                                            }
+                                            tracking.edit_text = tracking
+                                                .items
+                                                .get((hit - 1) as usize)
+                                                .map(|item| item.text.clone())
+                                                .unwrap_or_default();
+                                            // Typing extends the text rather than replacing it (not a Tab's selection).
+                                            tracking.edit_text_modified = true;
+                                            (
+                                                tracking.dialog_ptr,
+                                                tracking.edit_item,
+                                                tracking.edit_text.clone(),
+                                                tracking.items.clone(),
+                                            )
+                                        };
+                                        self.activate_dialog_edit_item(bus, cpu, dlg_ptr, &items, edit_item);
+                                        self.flush_dialog_edit_item_texts(
+                                            bus, dlg_ptr, &items, edit_item, &edit_text,
+                                        );
+                                    }
 
                                     if !is_disabled {
                                         match base_type {

@@ -238,6 +238,25 @@
         assert_eq!(default_item, 1);
     }
 
+    // Startside's patch: a disabled editText item (type $90) is still the field typing goes to (IM I-405);
+    // MacPaint 2.0's personalize dialog has only such fields.
+    #[test]
+    fn dialog_edit_state_takes_a_disabled_edit_text_item() {
+        let (_disp, _cpu, mut bus) = setup();
+        let dialog_ptr = bus.alloc(170);
+        bus.write_word(dialog_ptr + 164, 0xFFFF);
+        bus.write_word(dialog_ptr + 168, 1);
+        let items = vec![
+            DialogItem { item_type: 4, text: "OK".to_string(), ..Default::default() },
+            DialogItem { item_type: 4, text: "Cancel".to_string(), ..Default::default() },
+            DialogItem { item_type: 0x90, text: "Ann".to_string(), ..Default::default() },
+            DialogItem { item_type: 0x90, text: String::new(), ..Default::default() },
+        ];
+        let (text, edit_item, _) = TrapDispatcher::dialog_edit_state(&bus, dialog_ptr, &items);
+        assert_eq!(edit_item, 3);
+        assert_eq!(text, "Ann");
+    }
+
     #[test]
     fn dialog_edit_state_empty_live_handle_does_not_fallback_to_template_text() {
         let (_disp, _cpu, mut bus) = setup();
