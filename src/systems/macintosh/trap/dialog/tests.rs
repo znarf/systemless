@@ -18283,7 +18283,9 @@
         disp.te_set_text_contents(&mut bus, te_handle, b"12");
         assert_eq!(bus.read_word(te_ptr + TrapDispatcher::TE_LINE_HEIGHT_OFFSET) as i16, line_height);
 
-        let (screen_base, row_bytes, _screen_w, _screen_h, _pixel_size) = disp.screen_mode;
+        // The port's own 1-bit bitmap (setup_with_port: 64 bytes a row).
+        let screen_base = bus.read_long(0x181000 + 2);
+        let row_bytes = u32::from(bus.read_word(0x181000 + 6) & 0x3FFF);
         for i in 0..(row_bytes * 80) {
             bus.write_byte(screen_base + i, 0xFF);
         }
