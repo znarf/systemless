@@ -2731,6 +2731,29 @@ fn testcontrol_function_protocol_consumes_controlhandle_and_point_and_writes_int
     );
 }
 
+// Startside's patch: FindControl gives a scroll bar's TestControl parts, not inButton (SimCity's arrows).
+#[test]
+fn findcontrol_returns_scrollbar_part_codes() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let sp = 0x300000u32;
+    let window_ptr = bus.alloc(200);
+    let which_ctrl_out = bus.alloc(4);
+    let (scroll_handle, scroll_ptr) =
+        alloc_scrollbar_control(&mut disp, &mut bus, (60, 240, 220, 256), 255, 0, 40, 0, 100);
+    bus.write_long(scroll_ptr, 0);
+    bus.write_long(window_ptr + 140, scroll_handle);
+    for (pt_v, pt_h, expected) in [(70i16, 248i16, 20u16), (95, 248, 22), (126, 248, 129), (150, 248, 23), (210, 248, 21)] {
+        cpu.write_reg(Register::A7, sp);
+        bus.write_long(sp, which_ctrl_out);
+        bus.write_long(sp + 4, window_ptr);
+        bus.write_word(sp + 8, pt_v as u16);
+        bus.write_word(sp + 10, pt_h as u16);
+        disp.dispatch_control(true, 0x16C, &mut cpu, &mut bus).unwrap().unwrap();
+        assert_eq!(bus.read_word(sp + 12), expected);
+        assert_eq!(bus.read_long(which_ctrl_out), scroll_handle);
+    }
+}
+
 #[test]
 fn testcontrol_returns_standard_scrollbar_part_codes_for_vertical_scrollbar() {
     let (mut disp, mut cpu, mut bus) = setup();
