@@ -153,6 +153,13 @@ pub fn get_font_face(font_id: i16, size: i16) -> Option<&'static FontFace> {
     if let Some(face) = rasterize_resource_outline_face(font_id, size) {
         return Some(face);
     }
+    // The family's own bitmaps, scaled to the size asked, as the Font Manager
+    // did (a 1984 System file has Athens in 18 only, MacPaint asks for 12),
+    // rather than the bundled outline stand-in: the original fonts, as a disk
+    // brings them (Startside's patch).
+    if let Some(face) = scaled_resource_face(font_id, size) {
+        return Some(face);
+    }
     outline::face(font_id, size).map(|(face, _)| face)
 }
 
@@ -220,6 +227,113 @@ fn closest_font_face(font_id: i16, size: i16) -> Option<&'static FontFace> {
                 std::cmp::Reverse(face.size),
             )
         })
+}
+
+/// Faces made by scaling a disk's bitmap font to a size it lacks.
+static SCALED_FACES: LazyLock<Mutex<HashMap<(i16, i16), &'static FontFace>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Whether the disk's fonts hold this family in this very size: the sizes a
+/// FontSize menu outlines (RealFont, IM I-223).
+pub fn resource_face_is_real(font_id: i16, size: i16) -> bool {
+    RESOURCE_FACES
+        .lock()
+        .expect("resource font cache poisoned")
+        .contains_key(&(font_id, size))
+}
+
+/// Whether the disk's fonts hold this family at all.
+pub fn resource_family_known(font_id: i16) -> bool {
+    RESOURCE_FACES
+        .lock()
+        .expect("resource font cache poisoned")
+        .keys()
+        .any(|(id, _)| *id == font_id)
+}
+
+/// A size the disk's family lacks, made from one it has, as FMSwapFont did
+/// when scaling was allowed (IM I-222): twice the size first, then half,
+/// then the nearest larger, then the nearest smaller; each glyph stretched
+/// nearest-neighbour, as StretchBits draws a scaled font's characters.
+fn scaled_resource_face(font_id: i16, size: i16) -> Option<&'static FontFace> {
+    if let Some(face) = SCALED_FACES
+        .lock()
+        .expect("scaled font cache poisoned")
+        .get(&(font_id, size))
+    {
+        return Some(*face);
+    }
+    let sizes: Vec<&'static FontFace> = RESOURCE_FACES
+        .lock()
+        .expect("resource font cache poisoned")
+        .values()
+        .copied()
+        .filter(|face| face.font_id == font_id && face.size > 0)
+        .collect();
+    let source = sizes
+        .iter()
+        .copied()
+        .find(|f| f.size == size * 2)
+        .or_else(|| sizes.iter().copied().find(|f| f.size * 2 == size))
+        .or_else(|| {
+            sizes
+                .iter()
+                .copied()
+                .filter(|f| f.size > size)
+                .min_by_key(|f| f.size)
+        })
+        .or_else(|| sizes.iter().copied().max_by_key(|f| f.size))?;
+    let (to, from) = (i32::from(size), i32::from(source.size));
+    let scale = |v: i32| (v * to + from / 2).div_euclid(from);
+    let mut data = Vec::new();
+    let glyphs: Vec<Glyph> = source
+        .glyphs
+        .iter()
+        .map(|g| {
+            let (w, h) = (i32::from(g.width), i32::from(g.height));
+            let (nw, nh) = (scale(w).clamp(0, 255), scale(h).clamp(0, 255));
+            let offset = data.len();
+            for y in 0..nh {
+                let sy = (y * from / to).min(h - 1);
+                for x in 0..nw {
+                    let sx = (x * from / to).min(w - 1);
+                    data.push(
+                        source
+                            .data
+                            .get(g.data_offset + (sy * w + sx) as usize)
+                            .copied()
+                            .unwrap_or(0),
+                    );
+                }
+            }
+            Glyph {
+                width: nw as u8,
+                height: nh as u8,
+                advance: scale(i32::from(g.advance)).clamp(0, 255) as u8,
+                origin_x: scale(i32::from(g.origin_x)).clamp(-128, 127) as i8,
+                origin_y: scale(i32::from(g.origin_y)).clamp(-128, 127) as i8,
+                data_offset: offset,
+            }
+        })
+        .collect();
+    let m = source.metrics;
+    let face: &'static FontFace = Box::leak(Box::new(FontFace {
+        font_id,
+        size,
+        metrics: FontMetrics {
+            ascent: scale(i32::from(m.ascent)) as i16,
+            descent: scale(i32::from(m.descent)) as i16,
+            wid_max: scale(i32::from(m.wid_max)) as i16,
+            leading: scale(i32::from(m.leading)) as i16,
+        },
+        glyphs: Box::leak(glyphs.into_boxed_slice()),
+        data: Box::leak(data.into_boxed_slice()),
+    }));
+    SCALED_FACES
+        .lock()
+        .expect("scaled font cache poisoned")
+        .insert((font_id, size), face);
+    Some(face)
 }
 
 pub fn get_font_face_or_default(font_id: i16, size: i16) -> &'static FontFace {

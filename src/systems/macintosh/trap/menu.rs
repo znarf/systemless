@@ -1713,7 +1713,11 @@ impl super::TrapDispatcher {
                 names.push(encode_mac_roman_lossy(&name));
             }
         }
-        if requested_type == *b"FONT" {
+        // Startside's patch: the built-in families only when no resource file
+        // holds any (an application alone, no System): a disk's own System
+        // file lists its fonts, as the Font menu of a 1984 Mac did (the
+        // MacPaint floppy's 7, not those 7 and Systemless's 17).
+        if requested_type == *b"FONT" && names.is_empty() {
             for &(id, name) in crate::quickdraw::fonts::FONT_NAMES {
                 if id != crate::quickdraw::fonts::FONT_APPLICATION {
                     names.push(encode_mac_roman_lossy(name));
@@ -2255,6 +2259,9 @@ impl super::TrapDispatcher {
                 cpu.write_reg(Register::A7, sp + 8);
 
                 let res_type = res_type_word.to_be_bytes();
+                if self.desk_accessories_hidden && &res_type == b"DRVR" {
+                    return Some(Ok(()));
+                }
                 let names = self.resource_menu_names(bus, res_type);
                 self.mutate_menu_items(bus, menu_handle, |items| {
                     items.insert_resource_names(names, i16::MAX)

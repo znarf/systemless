@@ -10864,7 +10864,14 @@ impl super::TrapDispatcher {
                 let font_num = bus.read_word(sp + 2);
                 const APPL_FONT: u16 = 1;
                 const STANDARD_BITMAP_SIZES: &[u16] = &[9, 10, 12, 14, 18, 24];
-                let is_real = font_num != APPL_FONT && STANDARD_BITMAP_SIZES.contains(&size);
+                // Startside's patch: a family the disk's fonts hold answers
+                // from them (the MacPaint floppy's Athens: 18 only; its
+                // FontSize menu outlines that one, as on the real machine).
+                let is_real = if crate::quickdraw::fonts::resource_family_known(font_num as i16) {
+                    crate::quickdraw::fonts::resource_face_is_real(font_num as i16, size as i16)
+                } else {
+                    font_num != APPL_FONT && STANDARD_BITMAP_SIZES.contains(&size)
+                };
                 let bool_value: u16 = if is_real { 0x0100 } else { 0x0000 };
                 bus.write_word(sp + 4, bool_value);
                 cpu.write_reg(Register::A7, sp + 4);
