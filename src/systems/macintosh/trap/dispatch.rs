@@ -1853,6 +1853,11 @@ pub struct TrapDispatcher {
     /// Guest-controlled runners default to `false`; explicit frontend policy
     /// may set it while leaving `fullscreen_locked` to model guest state.
     pub menu_bar_hidden: bool,
+    /// Startside's patch: true, AddResMenu('DRVR') adds nothing: a disk's own
+    /// System file opened beneath the application doesn't put its desk
+    /// accessories in the Apple menu (they ran half-working, and broke the
+    /// application's own clicks).
+    pub desk_accessories_hidden: bool,
     /// Sound Manager state (channels, playback buffers).
     pub(crate) sound_manager: SharedProcessSoundManager,
     /// Menus loaded from MENU resources, in order of insertion
@@ -4010,6 +4015,7 @@ impl TrapDispatcher {
             menu_bar_policy: crate::runner::MenuBarPolicy::GuestControlled,
             initial_kiosk_guest_hide_observed: false,
             menu_bar_hidden: false,
+            desk_accessories_hidden: false,
             sound_manager: SharedProcessSoundManager::default(),
             menus: Vec::new(),
             menu_tracking,

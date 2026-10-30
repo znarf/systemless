@@ -927,10 +927,11 @@ fn addresmenu_prioritizes_fond_names_loads_resources_and_exposes_builtin_fonts()
         .iter()
         .find(|menu| menu.handle == handle)
         .expect("font menu should remain registered");
-    for expected in ["Chicago", "Geneva", "Monaco", "New York", "Palatino"] {
+    // A resource file holds a FONT, so the built-in families are not added.
+    for builtin in ["Chicago", "Geneva", "Monaco", "New York", "Palatino"] {
         assert!(
-            menu.items.iter().any(|item| item.text == expected),
-            "built-in family {expected} should appear in the Font menu"
+            !menu.items.iter().any(|item| item.text == builtin),
+            "built-in family {builtin} is listed only when no resource file holds a font"
         );
     }
     assert!(

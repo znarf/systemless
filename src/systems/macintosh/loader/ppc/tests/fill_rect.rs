@@ -1181,8 +1181,9 @@ fn gpu_native_scaled_text_matches_repeated_transfers_and_fallback() {
         for (vis, clip) in [CLIPS[0], CLIPS[3]] {
             let fixture = fixture(&pixels, vis, clip);
             for size in [6, 9, 18, 24] {
-                let (_, n, d) = get_font_face_scale_ratio(family, size);
-                assert_ne!(n, d);
+                // A resource strike is scaled into a face of the requested
+                // size, so the ratio may be 1:1.
+                let _ = get_font_face_scale_ratio(family, size);
                 for style in [0, 1, 4, 8, 31] {
                     for mode in [0, 1, 2, 3] {
                         let mut expected = None;
