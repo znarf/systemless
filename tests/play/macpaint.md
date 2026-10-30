@@ -17,7 +17,8 @@ The bucket, lasso, copy, paste and FatBits scripts check drawing pixels;
 reopened draws, saves, closes and reopens a picture and checks its pixels.
 Alert-button checks the
 highlight while held and after dragging outside; save-dialog checks that the
-menu title is no longer highlighted. Inspect `report.json` for assertion
+menu title is no longer highlighted. Open-ring checks the corner of the Open button's ring
+(16-pixel corners, as System 7.1 draws it on the same disk). Inspect `report.json` for assertion
 results and exhausted frames.
 
 On 29 October 2026, a local Chromium 156 preview using the pinned ZIP and a
