@@ -946,6 +946,7 @@ impl super::TrapDispatcher {
         // through 4-127; Inside Macintosh Volume I 1985, pp. I-282, I-304.
         let wmgr_port = self.ensure_color_window_manager_port(bus);
         self.set_current_port_state(bus, cpu, wmgr_port, None);
+        self.clip_window_manager_port_above(bus, wmgr_port, window_ptr);
 
         // Pre-Color QuickDraw WDEFs receive WindowPeek and commonly read the
         // classic inline portBits.bounds at offsets +8..+15 to turn portRect
@@ -1011,6 +1012,29 @@ impl super::TrapDispatcher {
         cpu.write_reg(Register::A7, return_slot);
         cpu.write_reg(Register::PC, trampolines[0]);
         true
+    }
+
+    /// Startside's patch: the Window Manager port's clipRgn for a WDEF call, the window's structure less the
+    /// windows in front of it (ClipAbove, IM I-295): it kept whatever an earlier drawing left, and SimCity's
+    /// title bar came back with stretches of its stripes missing.
+    fn clip_window_manager_port_above(&mut self, bus: &mut MacMemoryBus, wmgr_port: u32, window_ptr: u32) {
+        let clip = bus.read_long(wmgr_port + 28);
+        let struc = bus.read_long(window_ptr + Self::WINDOW_STRUC_RGN_OFFSET);
+        if clip == 0 || struc == 0 || Self::region_handle_rect(bus, struc).is_none() {
+            return;
+        }
+        Self::write_region_boolean_op(bus, clip, struc, struc, RegionBooleanOp::Union);
+        let occluders = crate::window_manager::window_occluders(
+            self.window_list.windows().into_iter(),
+            window_ptr,
+            |front| self.window_visible(bus, front),
+        );
+        for front in occluders {
+            let front_struc = bus.read_long(front + Self::WINDOW_STRUC_RGN_OFFSET);
+            if front_struc != 0 && Self::region_handle_rect(bus, front_struc).is_some() {
+                Self::write_region_boolean_op(bus, clip, clip, front_struc, RegionBooleanOp::Difference);
+            }
+        }
     }
 
     fn arm_window_def_on_create<C: CpuOps>(
@@ -1949,6 +1973,10 @@ impl super::TrapDispatcher {
         bus: &mut MacMemoryBus,
         rect: (i16, i16, i16, i16),
     ) {
+        // Startside's patch: an empty rect is a close box with no highlight (an application WDEF's).
+        if rect == (0, 0, 0, 0) {
+            return;
+        }
         // The standard WDEF toggles the close box with an XOR mask. Expanding
         // by one feeds the exact glyph bounds through invert_button_rect,
         // whose edge inset is otherwise intended for dialog buttons.
@@ -2161,6 +2189,14 @@ impl super::TrapDispatcher {
 
         // portRect, visRgn, clipRgn stay in local coords — no update needed.
         let global_content = self.window_local_rect_to_global(bus, the_window, local_content_rect);
+        if self.window_uses_custom_def_proc(bus, the_window) {
+            // Startside's patch: the regions the application's WDEF computed move with the window (MoveWindow
+            // offsets them, IM I-289); the standard geometry would cut SimCity's taller frame down to a title
+            // bar, leaving its own title bar and info bar outside the window.
+            for offset in [Self::WINDOW_CONT_RGN_OFFSET, Self::WINDOW_STRUC_RGN_OFFSET] {
+                Self::offset_region(bus, bus.read_long(the_window + offset), delta_h, delta_v);
+            }
+        } else {
         let global_structure =
             self.window_structure_global_rect_for_window(bus, the_window, global_content);
         Self::write_region_handle_rect(
@@ -2173,6 +2209,7 @@ impl super::TrapDispatcher {
             bus.read_long(the_window + Self::WINDOW_STRUC_RGN_OFFSET),
             Some(global_structure),
         );
+        }
         if let Some(update_rect) = old_update_rect {
             Self::write_region_handle_rect(
                 bus,
@@ -2330,6 +2367,117 @@ impl super::TrapDispatcher {
             global_port.0,
             front,
         );
+    }
+
+    /// Startside's patch: an application-WDEF window whose highlight changed is redrawn by its WDEF at the
+    /// end of the trap (HiliteWindow calls wDraw, IM I-301): SimCity's edit window kept its active title bar
+    /// behind its other windows.
+    fn note_wdef_hilite_change(&mut self, bus: &MacMemoryBus, window_ptr: u32) {
+        if self.window_uses_custom_def_proc(bus, window_ptr)
+            && self.window_visible(bus, window_ptr)
+            && !self.pending_wdef_redraws.contains(&window_ptr)
+        {
+            self.pending_wdef_redraws.push(window_ptr);
+        }
+    }
+
+    /// Startside's patch: arm wCalcRgns and wDraw for one pending window (call once A7 is popped).
+    fn arm_pending_wdef_redraw<C: CpuOps>(&mut self, cpu: &mut C, bus: &mut MacMemoryBus) {
+        while let Some(window_ptr) = self.pending_wdef_redraws.pop() {
+            if self.window_list.contains(&window_ptr) && self.window_visible(bus, window_ptr) {
+                self.pending_wdef_redraws.clear();
+                self.arm_window_def_draw(cpu, bus, window_ptr);
+                return;
+            }
+        }
+    }
+
+    /// Startside's patch: the frontmost visible window whose structure region holds the point, when its
+    /// definition is the application's own WDEF (FindWindow then asks it, IM I-287 and I-299). Windows
+    /// with the standard definition keep the HLE's geometry, so the walk stops at the first one hit.
+    fn custom_wdef_window_at(&self, bus: &MacMemoryBus, pt_v: i16, pt_h: i16, mbar_h: i16) -> Option<u32> {
+        for window_ptr in self.window_list.windows() {
+            if !self.window_visible(bus, window_ptr) {
+                continue;
+            }
+            let struc = Self::region_handle_rect(bus, bus.read_long(window_ptr + Self::WINDOW_STRUC_RGN_OFFSET));
+            if self.window_uses_custom_def_proc(bus, window_ptr) {
+                // A pre-Color WDEF reads portBits.bounds inline: not for a color port's record.
+                let color_port = (bus.read_word(window_ptr + 6) & 0xC000) != 0;
+                if !color_port && struc.is_some_and(|r| Self::point_in_rect(pt_v, pt_h, r)) {
+                    return Some(window_ptr);
+                }
+                continue;
+            }
+            let (top, left, bottom, right) = self.window_global_port_rect(bus, window_ptr);
+            let frame = (top.saturating_sub(20).max(mbar_h), left, bottom, right);
+            if struc.is_some_and(|r| Self::point_in_rect(pt_v, pt_h, r)) || Self::point_in_rect(pt_v, pt_h, frame) {
+                return None;
+            }
+        }
+        None
+    }
+
+    /// Startside's patch: run the window's WDEF with wHit (message 1, the point as param) and return
+    /// FindWindow's part from its answer (wInContent 1 .. wInZoomOut 6 are inContent 3 .. inZoomOut 8;
+    /// wNoHit is inDesk), writing theWindow; the WDEF is called from a small stub, as the ROM does.
+    fn arm_find_window_wdef_hit<C: CpuOps>(
+        &mut self,
+        cpu: &mut C,
+        bus: &mut MacMemoryBus,
+        window_ptr: u32,
+        pt_v: i16,
+        pt_h: i16,
+        result_slot: u32,
+        which_window_ptr: u32,
+    ) -> bool {
+        let proc_id = self.window_proc_ids.get(&window_ptr).copied().unwrap_or(0);
+        let proc_addr = Self::window_def_proc_addr(bus, bus.read_long(window_ptr + Self::WINDOW_DEF_PROC_OFFSET));
+        if !Self::window_def_entry_looks_callable(bus, proc_addr) {
+            return false;
+        }
+        if self.find_window_hit_stub == 0 {
+            self.find_window_hit_stub = bus.alloc(80);
+        }
+        let stub = self.find_window_hit_stub;
+        let var = if which_window_ptr != 0 { which_window_ptr } else { stub + 76 };
+        let param = ((pt_v as u16 as u32) << 16) | u32::from(pt_h as u16);
+        let code: [(u32, u16); 9] = [
+            (0, 0x42A7),  // CLR.L -(SP)            the LONGINT result
+            (2, 0x3F3C),  // MOVE.W #varCode,-(SP)
+            (6, 0x2F3C),  // MOVE.L #theWindow,-(SP)
+            (12, 0x3F3C), // MOVE.W #wHit,-(SP)
+            (16, 0x2F3C), // MOVE.L #param,-(SP)
+            (22, 0x4EB9), // JSR wdef
+            (28, 0x201F), // MOVE.L (SP)+,D0
+            (30, 0x6714), // BEQ nohit (52)
+            (32, 0x5440), // ADDQ.W #2,D0
+        ];
+        for (off, word) in code {
+            bus.write_word(stub + off, word);
+        }
+        bus.write_word(stub + 4, (proc_id & 0xF) as u16);
+        bus.write_long(stub + 8, window_ptr);
+        bus.write_word(stub + 14, 1);
+        bus.write_long(stub + 18, param);
+        bus.write_long(stub + 24, proc_addr);
+        bus.write_word(stub + 34, 0x33C0); // MOVE.W D0,result.L
+        bus.write_long(stub + 36, result_slot);
+        bus.write_word(stub + 40, 0x23FC); // MOVE.L #theWindow,var.L
+        bus.write_long(stub + 42, window_ptr);
+        bus.write_long(stub + 46, var);
+        bus.write_word(stub + 50, 0x4E75); // RTS
+        bus.write_word(stub + 52, 0x4279); // nohit: CLR.W result.L
+        bus.write_long(stub + 54, result_slot);
+        bus.write_word(stub + 58, 0x42B9); // CLR.L var.L
+        bus.write_long(stub + 60, var);
+        bus.write_word(stub + 64, 0x4E75); // RTS
+
+        let sp = cpu.read_reg(Register::A7).wrapping_sub(4);
+        bus.write_long(sp, cpu.read_reg(Register::PC));
+        cpu.write_reg(Register::A7, sp);
+        cpu.write_reg(Register::PC, stub);
+        true
     }
 
     fn find_window_at_point(
@@ -2917,11 +3065,13 @@ impl super::TrapDispatcher {
         if old_front != 0 {
             bus.write_byte(old_front + Self::WINDOW_HILITED_OFFSET, 0x00);
             self.queue_window_activation_event(bus, old_front, false);
+            self.note_wdef_hilite_change(bus, old_front);
         }
         self.track_window_front(bus, the_window);
         self.front_window = the_window;
         self.sync_cached_front_window_render_state(bus);
         bus.write_byte(the_window + Self::WINDOW_HILITED_OFFSET, 0xFF);
+        self.note_wdef_hilite_change(bus, the_window);
         self.queue_window_activation_event(bus, the_window, true);
         self.activate_palette_for_window(bus, the_window);
         // SelectWindow/MoveWindow front a window that may have been fully
@@ -3856,6 +4006,14 @@ impl super::TrapDispatcher {
         let old_port = *self.current_port;
         let old_gdevice = *self.current_gdevice;
         self.set_current_port_state(bus, cpu, window_ptr, None);
+        // Startside's patch: erased as PaintOne does, through the Window
+        // Manager's port, whatever clipRgn the application left on its own
+        // (IM I-296): SimCity sets an empty one on its hidden prompt window,
+        // which then showed over the city with no white behind its text.
+        let app_clip = bus.read_long(window_ptr + 28);
+        let open_clip = Self::alloc_rect_region_handle(bus, Some((-32767, -32767, 32767, 32767)));
+        bus.write_long(window_ptr + 28, open_clip);
+        self.set_current_port_state(bus, cpu, window_ptr, None);
         self.draw_rect(
             cpu,
             bus,
@@ -3867,6 +4025,11 @@ impl super::TrapDispatcher {
             },
             ShapeOp::Erase,
         );
+        bus.write_long(window_ptr + 28, app_clip);
+        let open_clip_ptr = bus.read_long(open_clip);
+        bus.free(open_clip_ptr);
+        bus.free(open_clip);
+        self.set_current_port_state(bus, cpu, window_ptr, None);
         self.set_current_port_state(bus, cpu, old_port, Some(old_gdevice));
     }
 
@@ -4466,7 +4629,17 @@ impl super::TrapDispatcher {
                 let sp = cpu.read_reg(Register::A7);
                 let the_window = bus.read_long(sp);
                 cpu.write_reg(Register::A7, sp + 4);
+                // Startside's patch: what was hidden behind other windows is
+                // painted as it comes to the front, as BringToFront does
+                // (PaintOne, IM I-296): SimCity's prompt, shown behind its map
+                // then selected, kept the map showing through.
+                let old_visible = (the_window != 0 && self.window_visible(bus, the_window))
+                    .then(|| self.snapshot_window_visibility(bus, the_window));
                 self.activate_as_front_window(bus, the_window);
+                if let Some(old_visible) = old_visible {
+                    self.paint_newly_exposed_window(bus, cpu, the_window, old_visible, true, true);
+                }
+                self.arm_pending_wdef_redraw(cpu, bus);
                 Ok(())
             }
 
@@ -4577,7 +4750,10 @@ impl super::TrapDispatcher {
                 }
                 cpu.write_reg(Register::A7, sp + 4);
                 if arm_custom_wdef_draw {
+                    self.pending_wdef_redraws.retain(|&w| w != the_window);
                     self.arm_window_def_draw(cpu, bus, the_window);
+                } else {
+                    self.arm_pending_wdef_redraw(cpu, bus);
                 }
                 Ok(())
             }
@@ -4720,6 +4896,7 @@ impl super::TrapDispatcher {
                     self.capture_gui_frame(bus, &format!("hide_window_{:08X}", the_window));
                 }
                 cpu.write_reg(Register::A7, sp + 4);
+                self.arm_pending_wdef_redraw(cpu, bus);
                 Ok(())
             }
 
@@ -4813,6 +4990,15 @@ impl super::TrapDispatcher {
                 let (part, window_ptr) = if native_menu_click || (mbar_h > 0 && pt_v < mbar_h) {
                     (1, 0) // inMenuBar
                 } else {
+                    // Startside's patch: a window drawn by the application's own WDEF answers for its frame
+                    // (SimCity's edit window: title bar and close box above a taller frame, all inDesk before).
+                    if let Some(custom) = self.custom_wdef_window_at(bus, pt_v, pt_h, mbar_h) {
+                        cpu.write_reg(Register::A7, sp + 8);
+                        if self.arm_find_window_wdef_hit(cpu, bus, custom, pt_v, pt_h, sp + 8, wnd_ptr_ptr) {
+                            return Some(Ok(()));
+                        }
+                        cpu.write_reg(Register::A7, sp);
+                    }
                     self.find_window_at_point(bus, pt_v, pt_h, mbar_h)
                 };
 
@@ -5296,24 +5482,37 @@ impl super::TrapDispatcher {
 
                 let sp = cpu.read_reg(Register::A7);
                 let the_window = bus.read_long(sp + 4);
-                let initial_point = (bus.read_word(sp) as i16, bus.read_word(sp + 2) as i16);
-                let Some((hit_rect, highlight_rect)) = self.standard_go_away_rects(bus, the_window)
+                // Startside's patch: a window drawn by the application's own WDEF (SimCity's edit window) has its
+                // close box where that WDEF said (FindWindow asked it): track around the press, a close box's
+                // size, with no highlight, as the WDEF's own wHit can't be asked from here.
+                let custom_rects = self.window_uses_custom_def_proc(bus, the_window).then(|| {
+                    let (v, h) = self.window_tracking_mouse_pos(bus);
+                    ((v - 6, h - 6, v + 7, h + 7), (0, 0, 0, 0))
+                });
+                let Some((hit_rect, highlight_rect)) = self.standard_go_away_rects(bus, the_window).or(custom_rects)
                 else {
                     bus.write_word(sp + 8, 0);
                     cpu.write_reg(Register::A7, sp + 8);
                     return Some(Ok(()));
                 };
 
-                if !Self::point_in_rect(initial_point.0, initial_point.1, hit_rect)
-                    || !self.window_tracking_button_down(bus)
-                {
-                    bus.write_word(sp + 8, 0);
+                // Startside's patch: thePt isn't read; the live mouse decides, as the ROM's tracking loop
+                // does (SimCity 1.11 pushes a pointer there, PEA, and its close boxes never closed).
+                let mouse = self.window_tracking_mouse_pos(bus);
+                let highlighted = Self::point_in_rect(mouse.0, mouse.1, hit_rect);
+                if !self.window_tracking_button_down(bus) {
+                    // Startside's patch: a click already released when the application gets to it (a busy
+                    // application at 5 MHz) is answered by where the mouse is, the ROM's WaitMouseUp loop
+                    // ending at once; its mouseUp is the loop's, as in the tracking path below.
+                    if highlighted {
+                        if let Some(index) = self.event_queue.iter().position(|event| event.what == 2) {
+                            self.event_queue.remove(index);
+                        }
+                    }
+                    bus.write_word(sp + 8, if highlighted { 0x0100 } else { 0 });
                     cpu.write_reg(Register::A7, sp + 8);
                     return Some(Ok(()));
                 }
-
-                let mouse = self.window_tracking_mouse_pos(bus);
-                let highlighted = Self::point_in_rect(mouse.0, mouse.1, hit_rect);
                 if highlighted {
                     self.toggle_standard_go_away_highlight(bus, highlight_rect);
                 }
@@ -5864,8 +6063,10 @@ impl super::TrapDispatcher {
                     // HiliteWindow is documented as "makes the window
                     // active or inactive" (a visible state change).
                     self.draw_single_window_chrome_inline(bus, the_window, f_hilite);
+                    self.note_wdef_hilite_change(bus, the_window);
                 }
                 cpu.write_reg(Register::A7, sp + 6);
+                self.arm_pending_wdef_redraw(cpu, bus);
                 Ok(())
             }
 
