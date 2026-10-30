@@ -1863,6 +1863,12 @@ pub struct TrapDispatcher {
     /// (DrawMenuBar, menu tracking), as on the real machine, where a game
     /// drawing over it covers it; true (the default), redrawn every frame.
     pub menu_bar_redrawn_each_frame: bool,
+    /// Startside's patch: false, a window's visRgn may cover the menu bar's
+    /// rows, as with the 64K and 128K ROMs' Window Manager (Macintosh 128K to
+    /// Plus): a 1988 game opening its window over the whole screen (Tetris)
+    /// draws from the top; true (the default), the menu bar is kept out of
+    /// every window, as from the SE's and Mac II's ROMs (IM V-245).
+    pub menu_bar_clips_windows: bool,
     /// Sound Manager state (channels, playback buffers).
     pub(crate) sound_manager: SharedProcessSoundManager,
     /// Menus loaded from MENU resources, in order of insertion
@@ -4001,6 +4007,7 @@ impl TrapDispatcher {
             desk_accessories_hidden: false,
             pre_multifinder_app: false,
             menu_bar_redrawn_each_frame: true,
+            menu_bar_clips_windows: true,
             sound_manager: SharedProcessSoundManager::default(),
             menus: Vec::new(),
             menu_tracking,

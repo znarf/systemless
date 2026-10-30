@@ -1335,7 +1335,12 @@ impl super::TrapDispatcher {
         content_rect: (i16, i16, i16, i16),
     ) -> (i16, i16, i16, i16) {
         let mbar_h = bus.read_word(crate::memory::globals::addr::MBAR_HEIGHT) as i16;
-        let title_top = if self.menu_bar_hidden {
+        let title_top = if !self.menu_bar_clips_windows {
+            // Startside's patch: the frame where it falls, above the screen
+            // for a window whose content starts at its top (Tetris), not a
+            // line drawn under the menu bar.
+            content_rect.0.saturating_sub(19)
+        } else if self.menu_bar_hidden {
             content_rect.0.saturating_sub(19).max(0)
         } else {
             content_rect.0.saturating_sub(19).max(mbar_h)
@@ -2644,7 +2649,7 @@ impl super::TrapDispatcher {
             && window_left <= 0
             && window_bottom >= screen_height as i16
             && window_right >= screen_width as i16;
-        if mbar_h > 0 && !self.menu_bar_hidden && !exact_fullscreen_plain {
+        if mbar_h > 0 && !self.menu_bar_hidden && !exact_fullscreen_plain && self.menu_bar_clips_windows {
             if let Some((top, left, bottom, right)) = Self::region_handle_rect(bus, vis_handle) {
                 if top < mbar_h {
                     let clipped = (top.max(mbar_h), left, bottom, right);
@@ -3560,7 +3565,7 @@ impl super::TrapDispatcher {
         // Inside Macintosh Volume V, V-245
         // In local coordinates, the menu bar is at y = mbar_h - wind_top.
         let mbar_h = bus.read_word(crate::memory::globals::addr::MBAR_HEIGHT) as i16;
-        let vis_top_local = mbar_h.saturating_sub(wind_top).max(0);
+        let vis_top_local = if self.menu_bar_clips_windows { mbar_h.saturating_sub(wind_top).max(0) } else { 0 };
         let mut content_rect = (vis_top_local, 0, port_height, port_width);
         // The menu-bar exclusion is a property of visRgn, not of the window's
         // content region, so the Window-Manager regions start from the whole
