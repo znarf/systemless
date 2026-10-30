@@ -152,6 +152,7 @@ fn reconcile_application_zone_limit(bus: &mut MacMemoryBus, old_limit: u32, new_
 
     bus.write_long(app_zone, new_limit); // bkLim
     bus.write_long(app_zone + 12, adjusted_free.min(zone_size)); // zcbFree
+    publish_heap_walk_block(bus, app_zone);
 }
 
 /// Keep the guest-visible application zone large enough to contain a
@@ -182,6 +183,7 @@ fn include_application_allocation_in_zone(bus: &mut MacMemoryBus, ptr: u32, size
     }
 
     bus.write_long(app_zone, allocation_end); // bkLim
+    publish_heap_walk_block(bus, app_zone);
 
     let old_appl_limit = bus.read_long(addr::APPL_LIMIT);
     if allocation_end > old_appl_limit {
@@ -195,6 +197,24 @@ fn include_application_allocation_in_zone(bus: &mut MacMemoryBus, ptr: u32, size
     if allocation_end > heap_end {
         bus.write_long(addr::HEAP_END, allocation_end);
     }
+}
+
+/// Startside's patch: the block header a heap walk reads first, at the zone's heapData (zone+52): one free block
+/// to bkLim, in the 1984 format (tag in the top two bits, 24-bit physical size; Inside Macintosh II-24). Systemless
+/// keeps its blocks' headers on the host, so the guest saw zeros there, and an application walking the heap block
+/// by block (MacWrite 1.1 adding up its free and purgeable blocks before it opens a document) looped for ever on a
+/// block of size 0. Rewritten whenever bkLim moves.
+pub(crate) fn publish_heap_walk_block(bus: &mut MacMemoryBus, zone: u32) {
+    if zone == 0 {
+        return;
+    }
+    let heap_data = zone.wrapping_add(52);
+    let bk_lim = bus.read_long(zone);
+    let size = bk_lim.wrapping_sub(heap_data);
+    if bk_lim <= heap_data || size > 0x00FF_FFFF {
+        return;
+    }
+    bus.write_long(heap_data, size & !3);
 }
 
 fn init_zone_header(
@@ -233,6 +253,7 @@ fn init_zone_header(
     bus.write_long(start + 40, 0); // purgeProc
     bus.write_long(start + 44, 0); // sparePtr
     bus.write_long(start + 48, start.wrapping_add(52)); // allocPtr
+    publish_heap_walk_block(bus, start);
 }
 
 fn scribble_uninitialized_allocation(bus: &mut MacMemoryBus, address: u32, size: u32) {

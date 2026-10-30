@@ -260,7 +260,11 @@ impl super::TrapDispatcher {
         // Driver presence is a capability probe. Keep this list limited to
         // services backed by the HLE: AppleTalk's .MPP/.ATP/.XPP drivers must
         // remain absent until their control, status, and protocol paths exist.
-        [".AIn", ".AOut", ".BIn", ".BOut"]
+        // `.Print`: applications of 1984-85 (MacWrite 1.1) carry their own
+        // Printing Manager code (PrLink, before _PrGlue) and open the driver
+        // by name as they start, quitting when it's missing; it accepts their
+        // calls and prints nothing (Startside's patch).
+        [".AIn", ".AOut", ".BIn", ".BOut", ".Print"]
             .iter()
             .any(|driver| filename.eq_ignore_ascii_case(driver))
     }

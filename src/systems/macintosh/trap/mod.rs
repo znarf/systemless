@@ -24,6 +24,8 @@ mod framebuffer;
 pub(crate) mod gateways;
 pub(crate) mod manager;
 mod memory;
+// Startside's patch: the launcher writes the heap walk's first block header too.
+pub(crate) use memory::publish_heap_walk_block;
 pub(crate) mod menu;
 mod movie_media;
 pub(crate) mod pict;
