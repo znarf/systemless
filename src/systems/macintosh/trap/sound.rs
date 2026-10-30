@@ -93,6 +93,25 @@ fn sound_dispatch_param_bytes(selector: u32) -> u32 {
     }
 }
 
+/// An asynchronous write to the Sound Driver (StartSound with a completion
+/// routine). Its ioResult stays positive while the sound plays; when it ends,
+/// the Device Manager sets ioResult, calls ioCompletion and starts the next
+/// request in the driver's queue (Inside Macintosh Volume II, II-180--II-181,
+/// II-231). Startside's patch: every write completed at once, so a game
+/// chaining writes for its music (Shufflepuck Cafe) saw each one done before
+/// it began and started it again every tick: its first 370 samples looped,
+/// a 60 Hz buzz instead of the cafe's music.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LegacySoundDriverRequest {
+    parameter_block: u32,
+    completion: u32,
+    buffer: u32,
+    count: usize,
+    started: bool,
+}
+
+const ABORT_ERR: i16 = -27;
+
 fn synth_sys_beep_samples() -> Vec<u8> {
     sound::synth_sys_beep_samples()
 }
@@ -122,11 +141,93 @@ impl super::TrapDispatcher {
         }
     }
 
+    /// Queue an asynchronous Sound Driver write (Startside's patch). The
+    /// first request plays at once; ioResult stays 1 until it has played.
+    pub(crate) fn queue_legacy_sound_driver_write(
+        &mut self,
+        bus: &mut MacMemoryBus,
+        parameter_block: u32,
+        buffer: u32,
+        count: usize,
+    ) {
+        self.legacy_sound_driver_requests.push_back(LegacySoundDriverRequest {
+            parameter_block,
+            completion: bus.read_long(parameter_block + 12),
+            buffer,
+            count,
+            started: false,
+        });
+        bus.write_long(parameter_block + 40, 0);
+        bus.write_word(parameter_block + 16, 1);
+        self.service_legacy_sound_driver_requests(bus);
+    }
+
+    /// Complete the request whose sound has played and start the next one,
+    /// as the driver did from its interrupt (Startside's patch). Run after
+    /// each mixed chunk, so chained requests follow one another without a gap.
+    pub(crate) fn service_legacy_sound_driver_requests(&mut self, bus: &mut MacMemoryBus) {
+        while let Some(request) = self.legacy_sound_driver_requests.front().copied() {
+            if !request.started {
+                match self.write_legacy_sound_driver(bus, request.buffer, request.count) {
+                    Ok(()) => {
+                        if let Some(front) = self.legacy_sound_driver_requests.front_mut() {
+                            front.started = true;
+                        }
+                    }
+                    Err(err) => {
+                        self.legacy_sound_driver_requests.pop_front();
+                        self.complete_legacy_sound_driver_request(bus, request, err);
+                    }
+                }
+                continue;
+            }
+            let playing = self
+                .legacy_sound_driver_channel
+                .and_then(|ptr| self.sound_manager.find_channel(ptr))
+                .is_some_and(|channel| channel.has_active_playback());
+            if playing {
+                break;
+            }
+            self.legacy_sound_driver_requests.pop_front();
+            self.complete_legacy_sound_driver_request(bus, request, 0);
+        }
+    }
+
+    /// KillIO on the Sound Driver (StopSound): the sound stops, and the
+    /// active and pending requests complete with abortErr (Inside Macintosh
+    /// Volume II, II-187, II-232). Startside's patch.
+    pub(crate) fn kill_legacy_sound_driver_io(&mut self, bus: &mut MacMemoryBus) {
+        if let Some(ptr) = self.legacy_sound_driver_channel {
+            self.sound_manager.with_channel_mut(ptr, |channel| channel.quiet());
+        }
+        let requests: Vec<_> = self.legacy_sound_driver_requests.drain(..).collect();
+        for request in requests {
+            self.complete_legacy_sound_driver_request(bus, request, ABORT_ERR);
+        }
+    }
+
+    /// ioActCount now, ioResult and the completion routine (A0 = the
+    /// parameter block, D0 = the result) from the runner's interrupt work.
+    fn complete_legacy_sound_driver_request(
+        &mut self,
+        bus: &mut MacMemoryBus,
+        request: LegacySoundDriverRequest,
+        result: i16,
+    ) {
+        let actual = if result == 0 { request.count as u32 } else { 0 };
+        bus.write_long(request.parameter_block + 40, actual);
+        self.pending_file_completions.push_back(crate::process_context::PendingFileCompletion {
+            parameter_block: request.parameter_block,
+            completion_addr: request.completion,
+            result,
+        });
+    }
+
     /// Decode a Sound Driver synthesizer buffer and submit it to the existing
     /// PCM mixer. StartSound is defined as a Device Manager Write with
     /// ioRefNum=-4, ioBuffer=synthRec, and ioReqCount=numBytes.
     /// Inside Macintosh Volume II (1985), pp. II-228 to II-232.
-    fn write_legacy_sound_driver(
+    pub(crate) fn write_legacy_sound_driver(
         &mut self,
         bus: &mut MacMemoryBus,
         buffer: u32,

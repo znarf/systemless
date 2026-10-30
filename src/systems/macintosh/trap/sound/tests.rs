@@ -288,6 +288,48 @@ fn legacy_sound_driver_decodes_supported_synths() {
     assert_eq!(disp.sound_manager.channels.len(), 1);
 }
 
+// Startside's patch: asynchronous Sound Driver writes queue (IM II-180,
+// II-231): the first plays, each stays in progress (ioResult 1) until its
+// sound has played, then completes (ioActCount, its completion routine) and
+// the next starts; KillIO completes the rest with abortErr.
+#[test]
+fn legacy_sound_driver_async_writes_play_in_turn() {
+    let (mut disp, _cpu, mut bus) = setup();
+    bus.write_byte(crate::memory::globals::addr::SD_VOLUME, 7);
+    let free_form = |bus: &mut MacMemoryBus, at: u32| {
+        bus.write_word(at, 0);
+        bus.write_long(at + 2, 0x0001_0000);
+        bus.write_bytes(at + 6, &[0x20, 0xE0, 0x20, 0xE0]);
+    };
+    let (first, second, third) = (0x2F0000u32, 0x2F1000u32, 0x2F2000u32);
+    let pbs = [0x2E0000u32, 0x2E0100, 0x2E0200];
+    for (pb, buffer) in pbs.iter().zip([first, second, third]) {
+        free_form(&mut bus, buffer);
+        bus.write_long(pb + 12, 0x2D0000); // ioCompletion
+        disp.queue_legacy_sound_driver_write(&mut bus, *pb, buffer, 10);
+    }
+    let io_result = |bus: &MacMemoryBus, pb: u32| bus.read_word(pb + 16) as i16;
+    assert_eq!(pbs.map(|pb| io_result(&bus, pb)), [1, 1, 1], "all in progress");
+    assert_eq!(disp.legacy_sound_driver_requests.len(), 3);
+    assert!(disp.pending_file_completions.is_empty(), "nothing done before it has played");
+
+    // The first sound played out: it completes and the second starts.
+    let mix = disp.sound_manager.mix_frame(64);
+    assert!(mix.iter().any(|sample| *sample != 0x80));
+    disp.service_legacy_sound_driver_requests(&mut bus);
+    assert_eq!(disp.legacy_sound_driver_requests.len(), 2);
+    assert_eq!(bus.read_long(pbs[0] + 40), 10, "ioActCount");
+    assert_eq!(disp.pending_file_completions.len(), 1);
+    assert_eq!(disp.pending_file_completions.front().unwrap().parameter_block, pbs[0]);
+    assert_eq!(io_result(&bus, pbs[1]), 1);
+
+    // StopSound: the playing and the waiting requests complete with abortErr.
+    disp.kill_legacy_sound_driver_io(&mut bus);
+    assert!(disp.legacy_sound_driver_requests.is_empty());
+    assert_eq!(disp.pending_file_completions.len(), 3);
+    assert_eq!(bus.read_long(pbs[2] + 40), 0);
+}
+
 #[test]
 fn square_wave_synth_rejects_oversized_decoded_output() {
     let (mut disp, _cpu, mut bus) = setup();
