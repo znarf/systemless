@@ -6200,7 +6200,7 @@ impl super::TrapDispatcher {
         self.restore_kiosk_dialog_desktop_background(bus);
         self.restore_window_manager_desktop(bus);
 
-        if !self.menus.is_empty() && !self.fullscreen_locked && !self.menu_bar_hidden {
+        if !self.menus.is_empty() && !self.fullscreen_locked && !self.menu_bar_hidden && self.menu_bar_redrawn_each_frame {
             self.refresh_menus_from_memory(bus);
             self.draw_menu_bar_to_fb(bus);
         }

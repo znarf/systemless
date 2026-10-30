@@ -5291,12 +5291,18 @@ impl FixtureRunner {
                 self.dispatcher.sound_manager.legacy_speaker_muted,
             );
             if samples.is_empty() {
+                self.dispatcher
+                    .service_legacy_sound_driver_requests(&mut self.bus);
                 self.queue_host_silence_audio(remaining_samples);
                 self.dispatcher
                     .release_finished_internal_sound_channels(&mut self.bus);
                 break;
             }
             self.queue_mixed_audio(&samples);
+            // A Sound Driver request played out: completed, the next started
+            // (Startside's patch).
+            self.dispatcher
+                .service_legacy_sound_driver_requests(&mut self.bus);
             self.dispatcher
                 .release_finished_internal_sound_channels(&mut self.bus);
             remaining_samples -= chunk;
