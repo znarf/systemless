@@ -4672,9 +4672,13 @@ impl FixtureRunner {
         // application. Startup INITs and application code can then find its
         // resources through GetResource. Inside Macintosh Volume I (1985),
         // pp. I-125–I-126.
+        // A 400K MFS disk of 1984-85 has no folders: its System file is at
+        // the volume's top ("Write/System"), as the Finder showed it
+        // (Startside's patch).
         if let Some(system_file) = self.vfs_file_summaries_where(|path| {
             let path = path.to_ascii_lowercase();
             path.ends_with("/system folder/system")
+                || (path.matches('/').count() == 1 && path.ends_with("/system"))
         }).into_iter().next() {
             if self.dispatcher.vfs_rsrc.contains_key(&system_file.path) {
                 let refnum = self.dispatcher.open_resource_file_from_vfs_key(

@@ -94,7 +94,8 @@ fn extract_uncompressed(bytes: &[u8]) -> Result<Option<DiskImageContents>, Strin
         Some(HFS_PLUS_SIGNATURE | HFSX_SIGNATURE) => {
             return extract_hfsplus(filesystem).map(Some);
         }
-        Some(HFS_SIGNATURE | MFS_SIGNATURE) => {}
+        Some(MFS_SIGNATURE) => return extract_mfs(filesystem).map(Some),
+        Some(HFS_SIGNATURE) => {}
         Some(_) | None => {}
     }
 
@@ -1122,4 +1123,127 @@ mod tests {
             .copy_from_slice(&HFSPLUS_CATALOG_FILE_RECORD.to_be_bytes());
         record
     }
+}
+
+/// The Macintosh File System of the first Macs' 400K disks (1984-85: MacWrite, MacPaint), flat, no folders: its files
+/// at the volume's top, as the Finder showed them. Inside Macintosh Volume II (1985), pp. II-119-II-123: the master
+/// directory block at 1024 (`drNmFls` 12, `drDirSt` 14, `drBlLen` 16, `drNmAlBlks` 18, `drAlBlkSiz` 20, `drAlBlSt` 28,
+/// `drVN` 36), the allocation map after it (12-bit entries from allocation block 2: the next block of a file, 1 its
+/// last), then the file directory, its entries never crossing a 512-byte block (`flFlags` bit 7 used, `flUsrWds` 2..18,
+/// `flStBlk` 22, `flLgLen` 24, `flRStBlk` 32, `flRLgLen` 34, `flNam` 50).
+fn extract_mfs(bytes: &[u8]) -> Result<DiskImageContents, String> {
+    let u16_at = |o: usize| -> Result<u16, String> {
+        bytes
+            .get(o..o + 2)
+            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+            .ok_or_else(|| "MFS image too short".to_string())
+    };
+    let u32_at = |o: usize| -> Result<u32, String> {
+        bytes
+            .get(o..o + 4)
+            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+            .ok_or_else(|| "MFS image too short".to_string())
+    };
+    let mdb = 1024;
+    let dir_start = usize::from(u16_at(mdb + 14)?);
+    let dir_len = usize::from(u16_at(mdb + 16)?);
+    let block_count = usize::from(u16_at(mdb + 18)?);
+    let block_size = u32_at(mdb + 20)? as usize;
+    let alloc_start = usize::from(u16_at(mdb + 28)?);
+    if block_size == 0 || block_size % 512 != 0 {
+        return Err(format!(
+            "MFS allocation block size {block_size} is not a multiple of 512"
+        ));
+    }
+    let name_len = usize::from(*bytes.get(mdb + 36).ok_or("MFS image too short")?).min(27);
+    let raw_name = bytes
+        .get(mdb + 37..mdb + 37 + name_len)
+        .ok_or("MFS image too short")?;
+    let volume_name =
+        clean_component(&decode_mac_roman(raw_name)).unwrap_or_else(|| "Disk Image".into());
+    // The allocation map: entry n is allocation block n + 2's successor.
+    let next_block = |block: usize| -> Option<usize> {
+        let index = block.checked_sub(2)?;
+        if index >= block_count {
+            return None;
+        }
+        let bit = index * 12;
+        let at = mdb + 64 + bit / 8;
+        let pair = u16::from_be_bytes([*bytes.get(at)?, *bytes.get(at + 1)?]);
+        Some(usize::from(if bit % 8 == 0 {
+            pair >> 4
+        } else {
+            pair & 0x0FFF
+        }))
+    };
+    let read_fork = |first: usize, length: usize| -> Result<Vec<u8>, String> {
+        let mut out = Vec::with_capacity(length);
+        let mut block = first;
+        let mut hops = 0;
+        while out.len() < length {
+            if block < 2 || hops > block_count {
+                return Err("MFS fork shorter than its length".into());
+            }
+            let offset = alloc_start * 512 + (block - 2) * block_size;
+            let chunk = bytes
+                .get(offset..offset + block_size)
+                .ok_or("MFS fork past the image's end")?;
+            out.extend_from_slice(chunk);
+            block = next_block(block).unwrap_or(0);
+            hops += 1;
+        }
+        out.truncate(length);
+        Ok(out)
+    };
+    let mut files = Vec::new();
+    for dir_block in 0..dir_len {
+        let start = (dir_start + dir_block) * 512;
+        let end = start + 512;
+        let mut o = start;
+        while o + 51 <= end && bytes.get(o).is_some_and(|flags| flags & 0x80 != 0) {
+            let name_len = usize::from(bytes[o + 50]);
+            let raw = bytes
+                .get(o + 51..o + 51 + name_len)
+                .ok_or("MFS directory entry past the image's end")?;
+            if let Some(name) = clean_component(&decode_mac_roman(raw)) {
+                let mut file_type = [0; 4];
+                let mut creator = [0; 4];
+                file_type.copy_from_slice(&bytes[o + 2..o + 6]);
+                creator.copy_from_slice(&bytes[o + 6..o + 10]);
+                let finder_flags = u16_at(o + 10)?;
+                let data = read_fork(usize::from(u16_at(o + 22)?), u32_at(o + 24)? as usize)?;
+                let rsrc = read_fork(usize::from(u16_at(o + 32)?), u32_at(o + 34)? as usize)?;
+                files.push(DiskImageFile {
+                    path: prefixed_path(&volume_name, &name),
+                    data,
+                    rsrc,
+                    file_type,
+                    creator,
+                    finder_flags,
+                });
+            }
+            o += 51 + name_len;
+            o += o & 1;
+        }
+    }
+    let volume_info = DiskImageVolumeInfo {
+        attributes: u16_at(mdb + 10)?,
+        file_count: files.len().min(usize::from(u16::MAX)) as u16,
+        allocation_block_count: block_count as u16,
+        allocation_block_size: block_size as u32,
+        clump_size: u32_at(mdb + 24)?,
+        free_blocks: u16_at(mdb + 34)?,
+        bitmap_start: 0,
+        allocation_pointer: 0,
+        allocation_start: alloc_start as u16,
+        next_catalog_id: u32_at(mdb + 30)?,
+        created_date: u32_at(mdb + 2)?,
+        modified_date: u32_at(mdb + 6)?,
+    };
+    Ok(DiskImageContents {
+        dirs: vec![volume_name.clone()],
+        volume_name,
+        volume_info,
+        files,
+    })
 }
