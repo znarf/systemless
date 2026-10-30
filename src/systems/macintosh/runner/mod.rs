@@ -4222,6 +4222,8 @@ impl FixtureRunner {
         let high_level_event_aware = app
             .size_resource
             .is_some_and(ApplicationSizeResource::is_high_level_event_aware);
+        // Startside's patch: an application older than MultiFinder (no SIZE resource): see `pre_multifinder_app`.
+        self.dispatcher.pre_multifinder_app = app.size_resource.is_none();
         self.dispatcher
             .apple_event_launch_state
             .reset_for_launch(high_level_event_aware);
@@ -4456,6 +4458,7 @@ impl FixtureRunner {
         // guest startup code can read the zone header directly.
         // Inside Macintosh: Memory (1992), pp. 2-20 and 2-88.
         self.bus.write_word(visible_zone_start + 20, 64);
+        crate::trap::publish_heap_walk_block(&mut self.bus, visible_zone_start);
         self.bus.write_long(
             visible_zone_start + 56,
             visible_zone_start + zone_header_size,

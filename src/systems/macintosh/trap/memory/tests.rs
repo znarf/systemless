@@ -10314,3 +10314,15 @@ fn disk_icon_controls_use_the_mounted_volume_drive_number() {
     assert_eq!(cpu.read_reg(Register::D0), 0);
     assert_ne!(bus.read_long(pb + 28), 0);
 }
+
+// Startside's patch: the heap walk's first block header, a free block from heapData to bkLim (IM II-24).
+#[test]
+fn heap_walk_block_spans_heap_data_to_bk_lim() {
+    let (_disp, _cpu, mut bus) = setup();
+    let zone = 0x0020_0000u32;
+    bus.write_long(zone, zone + 0x10_0034);
+    super::publish_heap_walk_block(&mut bus, zone);
+    let header = bus.read_long(zone + 52);
+    assert_eq!(header >> 30, 0, "a free block");
+    assert_eq!(zone + 52 + (header & 0x00FF_FFFF), zone + 0x10_0034);
+}

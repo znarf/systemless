@@ -2576,6 +2576,8 @@ impl super::TrapDispatcher {
         };
         if let Some(saved_vis) = Self::region_handle_rect(bus, bus.read_long(window + 24)) {
             self.saved_vis_regions.insert(window, saved_vis);
+            let bounds = self.port_bounds_top_left(bus, window);
+            self.saved_update_bounds.insert(window, bounds);
         }
         let vis_handle = bus.read_long(window + 24);
         let update_handle = bus.read_long(window + Self::WINDOW_UPDATE_RGN_OFFSET);
@@ -2634,8 +2636,18 @@ impl super::TrapDispatcher {
             // holes where other windows overlap, which a rect cannot carry.
             if !self.calc_window_vis_region(bus, window) {
                 Self::write_region_handle_rect(bus, bus.read_long(window + 24), Some(saved_vis));
+            } else if let Some((top, left)) = self.saved_update_bounds.get(&window).copied() {
+                // Startside's patch: the recomputed visRgn in the coordinates it had at BeginUpdate, as the real
+                // EndUpdate's saved copy is, not in those of whatever portBits the port holds now: MacWrite 1.1
+                // still has its line buffer's bitmap in the port at EndUpdate, its window's visRgn came back
+                // 93 pixels low and no line of text was ever drawn.
+                let (now_top, now_left) = self.port_bounds_top_left(bus, window);
+                if (now_top, now_left) != (top, left) {
+                    Self::offset_region(bus, bus.read_long(window + 24), left - now_left, top - now_top);
+                }
             }
         }
+        self.saved_update_bounds.remove(&window);
     }
 
     fn set_window_vis_from_content(&self, bus: &mut MacMemoryBus, window_ptr: u32, visible: bool) {
