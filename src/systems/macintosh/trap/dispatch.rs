@@ -1482,6 +1482,10 @@ pub struct TrapDispatcher {
     /// Startside's patch: counts writes to the virtual disk (a file's data or resources, a file removed), so an
     /// embedder can look for changed files only when something was written.
     pub(crate) vfs_write_generation: u64,
+    /// Startside's patch: the code FindWindow runs to ask an application WDEF its wHit (see window.rs).
+    pub(crate) find_window_hit_stub: u32,
+    /// Startside's patch: application-WDEF windows whose highlight changed, to redraw with wDraw at the trap's end.
+    pub(crate) pending_wdef_redraws: Vec<u32>,
     /// Address of the lazily-allocated trampoline template used by the
     /// Control Manager to call a guest CDEF procedure.
     pub(crate) control_def_trampoline: u32,
@@ -3891,6 +3895,8 @@ impl TrapDispatcher {
             list_def_trampoline: 0,
             window_def_trampoline: 0,
             vfs_write_generation: 0,
+            find_window_hit_stub: 0,
+            pending_wdef_redraws: Vec::new(),
             control_def_trampoline: 0,
             control_def_trampoline_chain: Vec::new(),
             control_callback_stack: Vec::new(),

@@ -7339,6 +7339,61 @@ fn trackgoaway_unhighlights_and_returns_false_after_dragging_out() {
     assert_eq!(bus.read_word(sp + 8), 0);
 }
 
+// Startside's patch: TrackGoAway follows the live mouse, not thePt (SimCity 1.11 pushes a pointer there).
+fn trackgoaway_test_window(disp: &mut super::super::TrapDispatcher, cpu: &mut super::super::test_helpers::MockCpu, bus: &mut crate::memory::MacMemoryBus) -> u32 {
+    bus.write_word(crate::memory::globals::addr::MBAR_HEIGHT, 20);
+    let window = bus.alloc(256);
+    disp.init_cgraf_window(bus, cpu, window, disp.screen_mode.0, 100, 100, 260, 360, "Document", 0, true, false, true, 0);
+    disp.front_window = window;
+    disp.window_list.replace(vec![window]);
+    bus.write_byte(window + super::super::TrapDispatcher::WINDOW_HILITED_OFFSET, 0xFF);
+    window
+}
+
+#[test]
+fn trackgoaway_ignores_a_garbage_point_and_tracks_the_live_mouse() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let window = trackgoaway_test_window(&mut disp, &mut cpu, &mut bus);
+    let sp = TEST_SP - 8;
+    cpu.write_reg(Register::A7, sp);
+    bus.write_long(sp, 0x0011_ED7E); // a pointer where the Point goes
+    bus.write_long(sp + 4, window);
+    disp.push_mouse_down(85, 105);
+    disp.event_queue.pop_front();
+    dispatch(&mut disp, 0x11E, &mut cpu, &mut bus).unwrap().unwrap();
+    assert!(disp.go_away_tracking.is_some());
+    disp.push_mouse_up(85, 105);
+    dispatch(&mut disp, 0x11E, &mut cpu, &mut bus).unwrap().unwrap();
+    assert_eq!(cpu.read_reg(Register::A7), sp + 8);
+    assert_eq!(bus.read_word(sp + 8), 0x0100);
+}
+
+#[test]
+fn trackgoaway_after_release_answers_by_the_mouse_position() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let window = trackgoaway_test_window(&mut disp, &mut cpu, &mut bus);
+    let sp = TEST_SP - 8;
+    disp.push_mouse_down(85, 105);
+    disp.event_queue.pop_front();
+    disp.push_mouse_up(85, 105);
+    cpu.write_reg(Register::A7, sp);
+    bus.write_word(sp, 85);
+    bus.write_word(sp + 2, 105);
+    bus.write_long(sp + 4, window);
+    dispatch(&mut disp, 0x11E, &mut cpu, &mut bus).unwrap().unwrap();
+    assert!(disp.go_away_tracking.is_none());
+    assert_eq!(cpu.read_reg(Register::A7), sp + 8);
+    assert_eq!(bus.read_word(sp + 8), 0x0100);
+    assert!(disp.event_queue.iter().all(|event| event.what != 2));
+
+    // Released away from the box: FALSE.
+    disp.set_mouse_position(130, 200);
+    cpu.write_reg(Register::A7, sp);
+    bus.write_long(sp + 4, window);
+    dispatch(&mut disp, 0x11E, &mut cpu, &mut bus).unwrap().unwrap();
+    assert_eq!(bus.read_word(sp + 8), 0);
+}
+
 // ---------------------------------------------------------------
 // 23. GrowWindow (0x12B) -- pops to SP+12, writes 0 at SP+12
 // ---------------------------------------------------------------

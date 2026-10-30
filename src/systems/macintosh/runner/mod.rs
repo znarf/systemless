@@ -309,6 +309,11 @@ fn trace_timer_enabled() -> bool {
     *TRACE_TIMER.get_or_init(|| std::env::var_os("SYSTEMLESS_TRACE_TIMER").is_some())
 }
 
+/// Startside's patch: the level-1 interrupt autovector (vector 25) and the RTE it holds until an
+/// application installs its own handler.
+const LEVEL1_AUTOVECTOR: u32 = 0x0064;
+const DEFAULT_LEVEL1_HANDLER: u32 = 0x0000_00FE;
+
 fn trace_vbl_enabled() -> bool {
     *TRACE_VBL.get_or_init(|| std::env::var_os("SYSTEMLESS_TRACE_VBL").is_some())
 }
@@ -11036,7 +11041,22 @@ impl FixtureRunner {
         self.fire_vbl_tasks();
         self.fire_timer_tasks(new_tick);
         self.fire_deferred_task();
+        self.raise_patched_level1_interrupt();
         new_tick
+    }
+
+    /// Startside's patch: a level-1 interrupt through the guest's own handler at each retrace, once the
+    /// application has replaced the autovector at $64. SimCity 1.11 runs its simulation as a second
+    /// thread switched in from that handler; never called, its city never aged (1900 Jan for ever).
+    /// The VIA's level-1 interrupt is the retrace's (Inside Macintosh III-22; the vector, I-103).
+    fn raise_patched_level1_interrupt(&mut self) {
+        if self.callback_suspends_guest_clock()
+            || self.bus.read_long(LEVEL1_AUTOVECTOR) == DEFAULT_LEVEL1_HANDLER
+        {
+            return;
+        }
+        // The core takes it at the next instruction boundary the SR mask allows, as the hardware does.
+        self.m68k.cpu.core.set_irq(1);
     }
 
     /// Deferred tasks execute once after an interrupt has been reenabled.
@@ -13441,6 +13461,9 @@ fn load_app_generic<M: MemoryBus>(
     // Properly handling those requires a skip-the-instruction stub
     // which is a separate undertaking.
     bus.write_word(0x00FE, 0x4E73); // RTE
+    // Startside's patch: the level-1 autovector returns at once (it pointed at an empty Quadra RAM handler),
+    // so an application that chains to the handler it found, as SimCity's does, lands on an RTE.
+    bus.write_long(LEVEL1_AUTOVECTOR, DEFAULT_LEVEL1_HANDLER);
     bus.write_long(0x0014, 0x0000_00FE); // ZeroDivide vector
     bus.write_long(0x0018, 0x0000_00FE); // CHK vector
     bus.write_long(0x001C, 0x0000_00FE); // TRAPV vector
