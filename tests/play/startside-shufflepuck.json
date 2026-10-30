@@ -1,0 +1,162 @@
+{
+  "version": 1,
+  "clock": "frontend_ticks",
+  "max_ticks": 1200,
+  "actions": [
+    {
+      "type": "run",
+      "ticks": 300
+    },
+    {
+      "type": "screenshot",
+      "name": "title"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 246,
+      "y": 151,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 248,
+      "y": 153,
+      "rgb": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 246,
+      "y": 156,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "mouse_move",
+      "v": 200,
+      "h": 250
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_down",
+      "v": 200,
+      "h": 250
+    },
+    {
+      "type": "run",
+      "ticks": 3
+    },
+    {
+      "type": "mouse_up",
+      "v": 200,
+      "h": 250
+    },
+    {
+      "type": "run",
+      "ticks": 120
+    },
+    {
+      "type": "screenshot",
+      "name": "bar"
+    },
+    {
+      "type": "assert_audio_during",
+      "ticks": 300,
+      "min_non_silent": 1000
+    },
+    {
+      "type": "mouse_move",
+      "v": 200,
+      "h": 250
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_down",
+      "v": 200,
+      "h": 250
+    },
+    {
+      "type": "run",
+      "ticks": 3
+    },
+    {
+      "type": "mouse_up",
+      "v": 200,
+      "h": 250
+    },
+    {
+      "type": "run",
+      "ticks": 300
+    },
+    {
+      "type": "screenshot",
+      "name": "table"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 0,
+      "y": 19,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 3,
+      "y": 22,
+      "rgb": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 13,
+      "y": 35,
+      "rgb": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 12,
+      "y": 35,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 30,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

@@ -1,0 +1,295 @@
+{
+  "version": 1,
+  "clock": "frontend_ticks",
+  "max_ticks": 2000,
+  "actions": [
+    {
+      "type": "run",
+      "ticks": 700
+    },
+    {
+      "type": "milestone",
+      "name": "scenarios"
+    },
+    {
+      "type": "mouse_move",
+      "v": 165,
+      "h": 105
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_down",
+      "v": 165,
+      "h": 105
+    },
+    {
+      "type": "run",
+      "ticks": 3
+    },
+    {
+      "type": "mouse_up",
+      "v": 165,
+      "h": 105
+    },
+    {
+      "type": "run",
+      "ticks": 600
+    },
+    {
+      "type": "mouse_move",
+      "v": 200,
+      "h": 250
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "mouse_down",
+      "v": 200,
+      "h": 250
+    },
+    {
+      "type": "run",
+      "ticks": 3
+    },
+    {
+      "type": "mouse_up",
+      "v": 200,
+      "h": 250
+    },
+    {
+      "type": "run",
+      "ticks": 480
+    },
+    {
+      "type": "screenshot",
+      "name": "code-prompt"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 250,
+      "y": 100,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 251,
+      "y": 100,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 250,
+      "y": 101,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 251,
+      "y": 101,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 268,
+      "y": 150,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 269,
+      "y": 151,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 235,
+      "y": 110,
+      "rgb": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 135,
+      "rgb": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 173,
+      "y": 202,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 202,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 219,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 250,
+      "y": 219,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 174,
+      "y": 210,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 482,
+      "y": 71,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 487,
+      "y": 66,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 488,
+      "y": 72,
+      "rgb": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "type": "key_down",
+      "key": 18,
+      "ch": 49
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_up",
+      "key": 18,
+      "ch": 49
+    },
+    {
+      "type": "run",
+      "ticks": 40
+    },
+    {
+      "type": "screenshot",
+      "name": "typed"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 219,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 250,
+      "y": 219,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 202,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "type": "assert_pixel",
+      "x": 174,
+      "y": 210,
+      "rgb": [
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}
