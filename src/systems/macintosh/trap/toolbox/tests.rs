@@ -12971,6 +12971,59 @@ fn standard_put_click_places_the_insertion_point_and_drag_selects() {
     assert!(disp.is_standard_file_put_tracking());
 }
 
+// Startside's patch: a press on the Save dialog's folder pop-up opens a menu
+// of the path (the folder, its parents, the disk) over it; released on a
+// row, the dialog goes to that folder.
+#[test]
+fn standard_put_folder_popup_goes_to_the_folder_chosen() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let base = bus.alloc(64 * 342);
+    disp.set_screen_mode_for_test(base, 64, 512, 342, 1);
+    disp.yield_for_ui = true;
+    let app_dir = disp.ensure_vfs_directory("Paint");
+    let docs_dir = disp.ensure_vfs_directory("Paint/Pictures");
+    disp.default_dir_id.with_mut(|default_dir_id| *default_dir_id = docs_dir);
+    bus.write_word(TEST_SP, 0x0005); // StandardPutFile selector
+    bus.write_long(TEST_SP + 2, 0x3201c0);
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().unwrap();
+    let tracking = disp.standard_file_put_tracking.as_ref().unwrap();
+    assert_eq!(tracking.current_dir_id, docs_dir);
+    let bounds = tracking.bounds;
+    let v = bounds.0 + super::STANDARD_FILE_PUT_VOLUME_RECT.0 + 6;
+    let h = bounds.1 + super::STANDARD_FILE_PUT_VOLUME_RECT.1 + 10;
+    let event = |what, v, h| QueuedEvent { what, message: 0, when: 0, where_v: v, where_h: h, modifiers: 0 };
+
+    disp.input_state.set_mouse_position_for_test((v, h));
+    disp.event_queue.push_back(event(1, v, h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().unwrap();
+    let menu = disp.standard_file_popup.as_ref().expect("the menu is open");
+    let names: Vec<_> = menu.items.iter().map(|(name, dir)| (name.clone(), *dir)).collect();
+    assert_eq!(names[..2], [("Pictures".to_string(), docs_dir), ("Paint".to_string(), app_dir)]);
+    assert_eq!(names.last().unwrap().1, 2, "the disk last");
+    let (top, _, _, _) = menu.rect;
+    let rows = names.len() as i16;
+
+    // Down to the disk's row, then released there.
+    let disk_v = top + 1 + (rows - 1) * 16 + 8;
+    disp.input_state.set_mouse_position_for_test((disk_v, h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().unwrap();
+    assert_eq!(disp.standard_file_popup.as_ref().unwrap().highlighted, Some(names.len() - 1));
+    disp.event_queue.push_back(event(2, disk_v, h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().unwrap();
+    assert!(disp.standard_file_popup.is_none());
+    assert_eq!(disp.standard_file_put_tracking.as_ref().unwrap().current_dir_id, 2);
+    assert!(disp.event_queue.iter().all(|event| event.what != 2), "the mouse-up is taken");
+
+    // Back to the folder: pressed and released on the second row.
+    disp.event_queue.push_back(event(1, v, h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().unwrap();
+    assert_eq!(disp.standard_file_popup.as_ref().unwrap().items.len(), 1, "at the disk, the disk alone");
+    disp.event_queue.push_back(event(2, v + 40, h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().unwrap();
+    assert!(disp.standard_file_popup.is_none());
+    assert_eq!(disp.standard_file_put_tracking.as_ref().unwrap().current_dir_id, 2, "released off the menu: no change");
+}
+
 #[test]
 fn standard_put_file_idle_pass_redraws_only_a_changed_dialog() {
     let (mut disp, mut cpu, mut bus) = setup();
