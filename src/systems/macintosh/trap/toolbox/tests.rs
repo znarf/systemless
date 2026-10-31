@@ -1,4 +1,5 @@
 use super::super::dispatch::QueuedEvent;
+use super::super::dispatch::StandardFilePopupIcon;
 use super::super::test_helpers::{setup, setup_with_port, MockCpu, TEST_SP};
 use super::{
     alias_dispatch_operation_route, ppc_operation_route, quicktime_movie_metadata,
@@ -10,8 +11,8 @@ use super::{
     AE_TYPE_OBJECT_SPECIFIER, AE_TYPE_TYPE, AE_TYPE_WILDCARD, ALIAS_DISPATCH_OPERATION_ROUTES,
     PPC_OPERATION_ROUTES, SLOT_MANAGER_OPERATION_ROUTES, STANDARD_FILE_GET_DIALOG_HEIGHT,
     STANDARD_FILE_GET_DIALOG_WIDTH, STANDARD_FILE_GET_LIST_RECT, STANDARD_FILE_GET_SCROLL_RECT,
-    STANDARD_FILE_GET_VOLUME_RECT, STANDARD_FILE_NAME_ITEM, STANDARD_FILE_PUT_DESKTOP_RECT,
-    STANDARD_FILE_PUT_LIST_RECT, STANDARD_FILE_SAVE_RECT,
+    STANDARD_FILE_GET_VOLUME_RECT, STANDARD_FILE_NAME_ITEM, STANDARD_FILE_POPUP_ROW_HEIGHT,
+    STANDARD_FILE_PUT_DESKTOP_RECT, STANDARD_FILE_PUT_LIST_RECT, STANDARD_FILE_SAVE_RECT,
 };
 use crate::cpu::{CpuOps, Register};
 use crate::execution_kernel::{ExecutionTaskId, ExecutionTaskState};
@@ -12901,6 +12902,179 @@ fn standard_put_cancel_tracks_release_and_drag_out() {
     disp.event_queue.push_back(event(2, v, h));
     disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus).unwrap().unwrap();
     assert!(!disp.is_standard_file_put_tracking());
+}
+
+// A path deeper than the screen holds (70 folders): the menu keeps the folders
+// nearest the current one and ends with the disk and Desktop, inside the screen.
+#[test]
+fn standard_put_folder_popup_menu_fits_the_screen_and_keeps_the_disk() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let base = bus.alloc(64 * 342);
+    disp.set_screen_mode_for_test(base, 64, 512, 342, 1);
+    disp.yield_for_ui = true;
+    let path: Vec<String> = (0..70).map(|n| format!("F{n}")).collect();
+    let deepest = disp.ensure_vfs_directory(&path.join("/"));
+    disp.default_dir_id
+        .with_mut(|default_dir_id| *default_dir_id = deepest);
+    bus.write_word(TEST_SP, 0x0005); // StandardPutFile selector
+    bus.write_long(TEST_SP + 2, 0x3201c0);
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    let bounds = disp.standard_file_put_tracking.as_ref().unwrap().bounds;
+    let v = bounds.0 + super::STANDARD_FILE_PUT_VOLUME_RECT.0 + 6;
+    let h = bounds.1 + super::STANDARD_FILE_PUT_VOLUME_RECT.1 + 10;
+    disp.input_state.set_mouse_position_for_test((v, h));
+    disp.event_queue.push_back(QueuedEvent {
+        what: 1,
+        message: 0,
+        when: 0,
+        where_v: v,
+        where_h: h,
+        modifiers: 0,
+    });
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    let menu = disp.standard_file_popup.as_ref().expect("the menu is open");
+    assert!(menu.items.len() < 72, "fewer rows than the path's 72");
+    assert_eq!(
+        menu.items[0],
+        ("F69".to_string(), deepest, StandardFilePopupIcon::Folder)
+    );
+    let n = menu.items.len();
+    assert_eq!(menu.items[n - 2].2, StandardFilePopupIcon::Disk, "the disk");
+    assert_eq!(
+        menu.items[n - 1],
+        ("Desktop".to_string(), 2, StandardFilePopupIcon::Desktop),
+        "then the desktop, last"
+    );
+    assert!(menu.rect.2 < 342, "inside the screen: {:?}", menu.rect);
+}
+
+// A press on the Save dialog's folder pop-up opens a menu
+// of the path (the folder, its parents, the disk) over it; released on a
+// row, the dialog goes to that folder.
+#[test]
+fn standard_put_folder_popup_goes_to_the_folder_chosen() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let base = bus.alloc(64 * 342);
+    disp.set_screen_mode_for_test(base, 64, 512, 342, 1);
+    disp.yield_for_ui = true;
+    let app_dir = disp.ensure_vfs_directory("Paint");
+    let docs_dir = disp.ensure_vfs_directory("Paint/Pictures");
+    disp.default_dir_id
+        .with_mut(|default_dir_id| *default_dir_id = docs_dir);
+    bus.write_word(TEST_SP, 0x0005); // StandardPutFile selector
+    bus.write_long(TEST_SP + 2, 0x3201c0);
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    let tracking = disp.standard_file_put_tracking.as_ref().unwrap();
+    assert_eq!(tracking.current_dir_id, docs_dir);
+    let bounds = tracking.bounds;
+    let v = bounds.0 + super::STANDARD_FILE_PUT_VOLUME_RECT.0 + 6;
+    let h = bounds.1 + super::STANDARD_FILE_PUT_VOLUME_RECT.1 + 10;
+    let event = |what, v, h| QueuedEvent {
+        what,
+        message: 0,
+        when: 0,
+        where_v: v,
+        where_h: h,
+        modifiers: 0,
+    };
+
+    disp.input_state.set_mouse_position_for_test((v, h));
+    disp.event_queue.push_back(event(1, v, h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    let menu = disp.standard_file_popup.as_ref().expect("the menu is open");
+    let names: Vec<_> = menu
+        .items
+        .iter()
+        .map(|(name, dir, _)| (name.clone(), *dir))
+        .collect();
+    assert_eq!(
+        names[..2],
+        [
+            ("Pictures".to_string(), docs_dir),
+            ("Paint".to_string(), app_dir)
+        ]
+    );
+    let icons: Vec<_> = menu.items.iter().map(|(_, _, icon)| *icon).collect();
+    let rows = names.len();
+    assert_eq!(names[rows - 2].1, 2, "the disk");
+    assert_eq!(icons[rows - 2], StandardFilePopupIcon::Disk);
+    assert_eq!(
+        names[rows - 1],
+        ("Desktop".to_string(), 2),
+        "then the desktop, last"
+    );
+    assert_eq!(icons[rows - 1], StandardFilePopupIcon::Desktop);
+    let (top, _, _, _) = menu.rect;
+    let row_v = |row: usize| top + 1 + row as i16 * STANDARD_FILE_POPUP_ROW_HEIGHT + 8;
+
+    // Down over the disk's row, then the desktop's, released there.
+    disp.input_state
+        .set_mouse_position_for_test((row_v(rows - 2), h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        disp.standard_file_popup.as_ref().unwrap().highlighted,
+        Some(rows - 2)
+    );
+    disp.input_state
+        .set_mouse_position_for_test((row_v(rows - 1), h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        disp.standard_file_popup.as_ref().unwrap().highlighted,
+        Some(rows - 1),
+        "the desktop's row highlighted"
+    );
+    disp.event_queue.push_back(event(2, row_v(rows - 1), h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    assert!(disp.standard_file_popup.is_none());
+    assert_eq!(
+        disp.standard_file_put_tracking
+            .as_ref()
+            .unwrap()
+            .current_dir_id,
+        2
+    );
+    assert!(
+        disp.event_queue.iter().all(|event| event.what != 2),
+        "the mouse-up is taken"
+    );
+
+    // Back to the folder: pressed and released on the second row.
+    disp.event_queue.push_back(event(1, v, h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        disp.standard_file_popup.as_ref().unwrap().items.len(),
+        2,
+        "at the disk, the disk and the desktop"
+    );
+    disp.event_queue.push_back(event(2, v + 40, h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    assert!(disp.standard_file_popup.is_none());
+    assert_eq!(
+        disp.standard_file_put_tracking
+            .as_ref()
+            .unwrap()
+            .current_dir_id,
+        2,
+        "released off the menu: no change"
+    );
 }
 
 #[test]

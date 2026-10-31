@@ -2360,6 +2360,12 @@ impl super::TrapDispatcher {
                     .iter()
                     .map(move |tracking| frame_rect(tracking.bounds)),
             )
+            // The folder pop-up's menu, with its shadow, may reach past the
+            // dialog.
+            .chain(self.standard_file_popup.iter().map(|menu| {
+                let (top, left, bottom, right) = menu.rect;
+                (top, left, bottom.saturating_add(1), right.saturating_add(1))
+            }))
             .chain(self.external_host_overlay_rects.iter().copied())
     }
 
@@ -9009,6 +9015,26 @@ mod redraw_chrome_tests {
             bus.read_byte(desktop_probe),
             0x7E,
             "unowned desktop pixels must still be restored"
+        );
+
+        // The folder pop-up's menu reaching past the dialog is kept too.
+        disp.standard_file_popup = Some(super::super::dispatch::StandardFilePopupMenu {
+            items: vec![(
+                "Disk".to_string(),
+                2,
+                super::super::dispatch::StandardFilePopupIcon::Disk,
+            )],
+            rect: (150, 400, 168, 520),
+            highlighted: None,
+            saved: SavedPixels::default(),
+        });
+        bus.fill_bytes(screen_base, row_bytes * u32::from(screen_h), 0x7E);
+        let menu_probe = screen_base + 160 * row_bytes + 510;
+        disp.redraw_chrome(&mut bus);
+        assert_eq!(
+            bus.read_byte(menu_probe),
+            0x7E,
+            "the folder pop-up's menu outside the dialog must remain visible"
         );
     }
 
