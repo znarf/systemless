@@ -776,6 +776,18 @@ pub(crate) struct StandardFilePutTrackingState {
     pub name_anchor: Option<usize>,
 }
 
+/// Startside's patch: Standard File's folder pop-up menu, open while the
+/// mouse button is held: the current folder, its parents, then the disk (a
+/// name and a directory id each), drawn at `rect` (global, its frame; the
+/// shadow is outside it) over the pixels `saved` keeps.
+#[derive(Clone, Debug)]
+pub(crate) struct StandardFilePopupMenu {
+    pub items: Vec<(String, u32)>,
+    pub rect: (i16, i16, i16, i16),
+    pub highlighted: Option<usize>,
+    pub saved: SavedPixels,
+}
+
 /// Candidate file shown by a retained Standard File get dialog.
 #[derive(Clone, Debug)]
 pub(crate) struct StandardFileGetEntry {
@@ -2300,6 +2312,9 @@ pub struct TrapDispatcher {
     pub(crate) standard_file_put_tracking: Option<StandardFilePutTrackingState>,
     /// Active Standard File Package open dialog tracking state.
     pub(crate) standard_file_get_tracking: Option<StandardFileGetTrackingState>,
+    /// Startside's patch: the folder pop-up of the Standard File dialog up,
+    /// held open.
+    pub(crate) standard_file_popup: Option<StandardFilePopupMenu>,
     /// The screen mark taken when a Standard File dialog was last drawn. An
     /// idle pass that consumed no event redraws the dialog only when the
     /// screen under its frame changed since.
@@ -4205,6 +4220,7 @@ impl TrapDispatcher {
             standard_file_put_tracking: None,
             standard_file_drawn: None,
             standard_file_get_tracking: None,
+            standard_file_popup: None,
             external_host_overlay_rects: Vec::new(),
             dialog_items: HashMap::default(),
             dialog_default_outlines: HashSet::default(),
