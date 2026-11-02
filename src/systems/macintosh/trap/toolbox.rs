@@ -2918,7 +2918,7 @@ impl super::TrapDispatcher {
             left + button_right,
             "Save",
             true,
-            writable,
+            writable && !tracking.name.trim().is_empty(),
         );
         let (vtop, vleft, vbottom, vright) = STANDARD_FILE_PUT_VOLUME_RECT;
         self.draw_popup_control(
@@ -3179,7 +3179,15 @@ impl super::TrapDispatcher {
         default_name_ptr: u32,
         requested_origin: Option<(i16, i16)>,
     ) {
-        let default_name = standard_file_default_name(bus, default_name_ptr);
+        // An empty default name leaves the field empty (Save dimmed until a
+        // name is typed), as the Standard File package shows it; only a
+        // reply made without the dialog needs a fallback name.
+        let mut default_name = if default_name_ptr != 0 {
+            bus.read_pstring(default_name_ptr)
+        } else {
+            Vec::new()
+        };
+        default_name.truncate(63);
         let mut name = decode_mac_roman(&default_name);
         Self::standard_file_clamp_name(&mut name);
         let bounds = self.standard_file_put_dialog_bounds(requested_origin);

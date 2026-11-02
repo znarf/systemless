@@ -12903,6 +12903,61 @@ fn standard_put_cancel_tracks_release_and_drag_out() {
     assert!(!disp.is_standard_file_put_tracking());
 }
 
+// IM I-519 (SFPutFile, origName): the name field starts with the default
+// name given, and an empty one leaves it empty, with Save disabled until a
+// name is typed (MacPaint passes an empty name for an untitled picture).
+#[test]
+fn standard_put_empty_default_name_leaves_the_field_empty() {
+    let (mut disp, mut cpu, mut bus) = setup();
+    let base = bus.alloc(64 * 342);
+    disp.set_screen_mode_for_test(base, 64, 512, 342, 1);
+    disp.yield_for_ui = true;
+    let name_ptr = 0x320E00u32;
+    bus.write_byte(name_ptr, 0);
+    bus.write_word(TEST_SP, 0x0005); // StandardPutFile selector
+    bus.write_long(TEST_SP + 2, 0x3201c0);
+    bus.write_long(TEST_SP + 6, name_ptr);
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    assert_eq!(disp.standard_file_put_tracking.as_ref().unwrap().name, "");
+
+    // Save pressed with no name: nothing happens.
+    let bounds = disp.standard_file_put_tracking.as_ref().unwrap().bounds;
+    let v = bounds.0 + super::STANDARD_FILE_SAVE_RECT.0 + 4;
+    let h = bounds.1 + super::STANDARD_FILE_SAVE_RECT.1 + 4;
+    let event = |what, v, h| QueuedEvent {
+        what,
+        message: 0,
+        when: 0,
+        where_v: v,
+        where_h: h,
+        modifiers: 0,
+    };
+    disp.event_queue.push_back(event(1, v, h));
+    disp.event_queue.push_back(event(2, v, h));
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    assert!(disp.is_standard_file_put_tracking());
+
+    disp.event_queue.push_back(QueuedEvent {
+        what: 3,
+        message: u32::from(b'a'),
+        when: 0,
+        where_v: 0,
+        where_h: 0,
+        modifiers: 0,
+    });
+    disp.dispatch_toolbox(true, 0x1EA, &mut cpu, &mut bus)
+        .unwrap()
+        .unwrap();
+    assert_eq!(disp.standard_file_put_tracking.as_ref().unwrap().name, "a");
+}
+
 #[test]
 fn standard_put_file_idle_pass_redraws_only_a_changed_dialog() {
     let (mut disp, mut cpu, mut bus) = setup();

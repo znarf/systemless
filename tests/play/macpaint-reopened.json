@@ -1,7 +1,7 @@
 {
   "version": 1,
   "clock": "frontend_ticks",
-  "max_ticks": 650,
+  "max_ticks": 682,
   "actions": [
     {
       "type": "run",
@@ -64,6 +64,150 @@
     {
       "type": "screenshot",
       "name": "save"
+    },
+    {
+      "type": "key_down",
+      "key": 32,
+      "ch": 85
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_up",
+      "key": 32,
+      "ch": 85
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_down",
+      "key": 45,
+      "ch": 110
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_up",
+      "key": 45,
+      "ch": 110
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_down",
+      "key": 17,
+      "ch": 116
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_up",
+      "key": 17,
+      "ch": 116
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_down",
+      "key": 34,
+      "ch": 105
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_up",
+      "key": 34,
+      "ch": 105
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_down",
+      "key": 17,
+      "ch": 116
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_up",
+      "key": 17,
+      "ch": 116
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_down",
+      "key": 37,
+      "ch": 108
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_up",
+      "key": 37,
+      "ch": 108
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_down",
+      "key": 14,
+      "ch": 101
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_up",
+      "key": 14,
+      "ch": 101
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_down",
+      "key": 2,
+      "ch": 100
+    },
+    {
+      "type": "run",
+      "ticks": 2
+    },
+    {
+      "type": "key_up",
+      "key": 2,
+      "ch": 100
+    },
+    {
+      "type": "run",
+      "ticks": 2
     },
     {
       "type": "key_down",
