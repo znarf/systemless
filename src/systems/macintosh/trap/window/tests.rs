@@ -3595,6 +3595,79 @@ fn hide_window_already_hidden_window_does_not_erase_screen_pixels() {
 }
 
 #[test]
+fn hide_window_erases_only_the_window_when_its_port_origin_was_moved() {
+    // SetOrigin offsets portRect and portBits.bounds together (Inside
+    // Macintosh Volume I, I-166): the window stays where it is on the
+    // screen, and that is the rectangle HideWindow erases.
+    let (mut disp, mut cpu, mut bus) = setup();
+    let screen_base = bus.alloc(800 * 600);
+    bus.write_long(0x0824, screen_base);
+    disp.set_screen_mode_for_test(screen_base, 800, 800, 600, 8);
+
+    let window = bus.alloc(256);
+    disp.init_cgraf_window(
+        &mut bus,
+        &mut cpu,
+        window,
+        screen_base,
+        200,
+        200,
+        300,
+        400,
+        "Scrolled",
+        0,
+        true,
+        true,
+        false,
+        0,
+    );
+    disp.window_list.replace(vec![window]);
+    disp.sync_window_list_links(&mut bus);
+    disp.front_window = window;
+    disp.current_port
+        .with_mut(|current_port| *current_port = window);
+
+    // As SetOrigin(50, 60) leaves the port.
+    let pixmap = bus.read_long(bus.read_long(window + 2));
+    for (address, delta) in [
+        (window + 16, 60),
+        (window + 18, 50),
+        (window + 20, 60),
+        (window + 22, 50),
+        (pixmap + 6, 60),
+        (pixmap + 8, 50),
+        (pixmap + 10, 60),
+        (pixmap + 12, 50),
+    ] {
+        let moved = (bus.read_word(address) as i16).wrapping_add(delta);
+        bus.write_word(address, moved as u16);
+    }
+
+    // Above and left of the window and its title bar.
+    let outside = screen_base + 150 * 800 + 160;
+    bus.write_byte(outside, 0x42);
+    let inside = screen_base + 250 * 800 + 300;
+    bus.write_byte(inside, 0x42);
+
+    let sp = TEST_SP - 4;
+    cpu.write_reg(Register::A7, sp);
+    bus.write_long(sp, window);
+    let result = dispatch(&mut disp, 0x116, &mut cpu, &mut bus);
+    assert!(result.unwrap().is_ok());
+
+    assert_ne!(
+        bus.read_byte(inside),
+        0x42,
+        "the window's content is erased"
+    );
+    assert_eq!(
+        bus.read_byte(outside),
+        0x42,
+        "pixels outside the window stay as they were"
+    );
+}
+
+#[test]
 fn hide_window_restores_saved_under_pixels_for_non_document_window() {
     let (mut disp, mut cpu, mut bus) = setup();
     let screen_base = bus.alloc(800 * 600);
