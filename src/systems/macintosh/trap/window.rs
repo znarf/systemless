@@ -4959,31 +4959,12 @@ impl super::TrapDispatcher {
                     let foreground = self.save_pixels_above_window(bus, the_window);
                     // Erase the window's chrome area BEFORE clearing
                     // visible so the screen doesn't retain stale chrome.
-                    let (wind_top, wind_left, wind_bottom, wind_right) = {
-                        let port_version = bus.read_word(the_window + 6);
-                        let (pmap_top, pmap_left) = if (port_version & 0xC000) == 0xC000 {
-                            let pm_handle = bus.read_long(the_window + 2);
-                            let pm_ptr = bus.read_long(pm_handle);
-                            (
-                                bus.read_word(pm_ptr + 6) as i16,
-                                bus.read_word(pm_ptr + 8) as i16,
-                            )
-                        } else {
-                            (
-                                bus.read_word(the_window + 8) as i16,
-                                bus.read_word(the_window + 10) as i16,
-                            )
-                        };
-                        // wrapping ops match 68k Mac OS i16 wrap-
-                        // around (avoids debug-build panic on
-                        // ports with bounds.topLeft = i16::MIN or
-                        // span exceeding i16 range).
-                        let wt = pmap_top.wrapping_neg();
-                        let wl = pmap_left.wrapping_neg();
-                        let pb = bus.read_word(the_window + 20) as i16;
-                        let pr = bus.read_word(the_window + 22) as i16;
-                        (wt, wl, wt.wrapping_add(pb), wl.wrapping_add(pr))
-                    };
+                    // The port rectangle in global coordinates: its own
+                    // origin counts, an application may have moved it with
+                    // SetOrigin (MacPaint's document window follows the
+                    // page's scroll position).
+                    let (wind_top, wind_left, wind_bottom, wind_right) =
+                        self.window_global_port_rect(bus, the_window);
                     bus.write_byte(the_window + Self::WINDOW_VISIBLE_OFFSET, 0x00);
                     self.set_window_vis_from_content(bus, the_window, false);
                     self.clear_queued_update_events(the_window);
