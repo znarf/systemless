@@ -2136,6 +2136,7 @@ impl super::TrapDispatcher {
                 // guest DrawMenuBar call is an explicit request to present its
                 // menus, so ownership returns to the guest before rendering.
                 self.release_initial_menu_bar_kiosk();
+                self.menu_bar_drawn_by_guest = true;
                 self.refresh_menus_from_memory(bus);
                 self.draw_menu_bar_to_fb(bus);
                 Ok(())

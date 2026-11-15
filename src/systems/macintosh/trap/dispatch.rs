@@ -1907,8 +1907,11 @@ pub struct TrapDispatcher {
     /// rows, as with the 64K and 128K ROMs' Window Manager (Macintosh 128K to
     /// Plus): a 1988 game opening its window over the whole screen (Tetris)
     /// draws from the top; true (the default), the menu bar is kept out of
-    /// every window, as from the SE's and Mac II's ROMs (IM V-245).
+    /// every window, as from the SE's and Mac II's ROMs (IM V-245). An
+    /// application that has called DrawMenuBar keeps its menu bar either way.
     pub menu_bar_clips_windows: bool,
+    /// Startside's patch: the guest has called DrawMenuBar.
+    pub(crate) menu_bar_drawn_by_guest: bool,
     /// Sound Manager state (channels, playback buffers).
     pub(crate) sound_manager: SharedProcessSoundManager,
     /// Menus loaded from MENU resources, in order of insertion
@@ -4101,6 +4104,7 @@ impl TrapDispatcher {
             pre_multifinder_app: false,
             menu_bar_redrawn_each_frame: true,
             menu_bar_clips_windows: true,
+            menu_bar_drawn_by_guest: false,
             sound_manager: SharedProcessSoundManager::default(),
             menus: Vec::new(),
             menu_tracking,

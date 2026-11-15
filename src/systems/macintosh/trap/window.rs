@@ -1418,6 +1418,16 @@ impl super::TrapDispatcher {
         )
     }
 
+    /// Startside's patch: whether the menu bar's rows stay out of a window's
+    /// visRgn. Always when the embedder asks (`menu_bar_clips_windows`, the
+    /// default); else only once the application has drawn its menu bar:
+    /// MacPaint 1.3's window covers the whole screen and its updates fill it,
+    /// while a game that never calls DrawMenuBar (Tetris) draws its window
+    /// from the top row.
+    fn menu_bar_keeps_windows_out(&self) -> bool {
+        self.menu_bar_clips_windows || self.menu_bar_drawn_by_guest
+    }
+
     fn window_structure_global_rect_for_content(
         &self,
         bus: &MacMemoryBus,
@@ -2925,7 +2935,7 @@ impl super::TrapDispatcher {
             && window_left <= 0
             && window_bottom >= screen_height as i16
             && window_right >= screen_width as i16;
-        if mbar_h > 0 && !self.menu_bar_hidden && !exact_fullscreen_plain && self.menu_bar_clips_windows {
+        if mbar_h > 0 && !self.menu_bar_hidden && !exact_fullscreen_plain && self.menu_bar_keeps_windows_out() {
             if let Some((top, left, bottom, right)) = Self::region_handle_rect(bus, vis_handle) {
                 if top < mbar_h {
                     let clipped = (top.max(mbar_h), left, bottom, right);
@@ -3850,7 +3860,7 @@ impl super::TrapDispatcher {
         // Inside Macintosh Volume V, V-245
         // In local coordinates, the menu bar is at y = mbar_h - wind_top.
         let mbar_h = bus.read_word(crate::memory::globals::addr::MBAR_HEIGHT) as i16;
-        let vis_top_local = if self.menu_bar_clips_windows { mbar_h.saturating_sub(wind_top).max(0) } else { 0 };
+        let vis_top_local = if self.menu_bar_keeps_windows_out() { mbar_h.saturating_sub(wind_top).max(0) } else { 0 };
         let mut content_rect = (vis_top_local, 0, port_height, port_width);
         // The menu-bar exclusion is a property of visRgn, not of the window's
         // content region, so the Window-Manager regions start from the whole
